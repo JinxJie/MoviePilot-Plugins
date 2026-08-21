@@ -184,98 +184,67 @@ class HHLottery(_PluginBase):
         """
         返回插件配置表单（Vuetify 组件）
         """
-        # 表单定义
         form = [
             {
                 "component": "VForm",
                 "content": [
+                    # ── 基础设置 ──
                     {
                         "component": "VRow",
                         "content": [
-                            # 启用插件
                             {
                                 "component": "VCol",
-                                "props": {"cols": 12, "md": 4},
+                                "props": {"cols": 12},
                                 "content": [
                                     {
                                         "component": "VSwitch",
                                         "props": {
                                             "model": "enabled",
                                             "label": "启用插件",
-                                        },
-                                    }
-                                ],
-                            },
-                            # 推送通知
-                            {
-                                "component": "VCol",
-                                "props": {"cols": 12, "md": 4},
-                                "content": [
-                                    {
-                                        "component": "VSwitch",
-                                        "props": {
-                                            "model": "notify",
-                                            "label": "推送通知",
-                                        },
-                                    }
-                                ],
-                            },
-                            # 立即运行一次
-                            {
-                                "component": "VCol",
-                                "props": {"cols": 12, "md": 4},
-                                "content": [
-                                    {
-                                        "component": "VSwitch",
-                                        "props": {
-                                            "model": "onlyonce",
-                                            "label": "立即运行一次",
+                                            "color": "primary",
                                         },
                                     }
                                 ],
                             },
                         ],
                     },
+                    # ── 定时与站点 ──
                     {
                         "component": "VRow",
                         "content": [
-                            # Cron 表达式
                             {
                                 "component": "VCol",
-                                "props": {"cols": 12, "md": 6},
+                                "props": {"cols": 12, "sm": 6},
                                 "content": [
                                     {
                                         "component": "VTextField",
                                         "props": {
                                             "model": "cron",
-                                            "label": "定时表达式",
+                                            "label": "⏰ 定时表达式",
                                             "placeholder": "5 0 * * *",
-                                            "hint": "Cron 表达式，默认每天 0:05",
+                                            "hint": "默认每天 0:05 运行",
                                             "persistent-hint": True,
                                         },
                                     }
                                 ],
                             },
-                            # 站点地址
                             {
                                 "component": "VCol",
-                                "props": {"cols": 12, "md": 6},
+                                "props": {"cols": 12, "sm": 6},
                                 "content": [
                                     {
                                         "component": "VTextField",
                                         "props": {
                                             "model": "site_url",
-                                            "label": "站点地址",
+                                            "label": "🌐 站点地址",
                                             "placeholder": "https://hhanclub.net",
-                                            "hint": "HHCLUB 站点 URL",
-                                            "persistent-hint": True,
                                         },
                                     }
                                 ],
                             },
                         ],
                     },
-                    # Cookie
+                    # ── Cookie ──
                     {
                         "component": "VRow",
                         "content": [
@@ -287,137 +256,169 @@ class HHLottery(_PluginBase):
                                         "component": "VTextarea",
                                         "props": {
                                             "model": "cookie",
-                                            "label": "Cookie",
-                                            "placeholder": "从浏览器复制完整 Cookie",
-                                            "hint": "必填，从浏览器开发者工具复制",
+                                            "label": "🔑 Cookie",
+                                            "placeholder": "从浏览器 F12 复制完整 Cookie",
+                                            "rows": 2,
+                                            "hint": "必填，F12 → Network → 复制 Cookie",
                                             "persistent-hint": True,
-                                            "rows": 3,
                                         },
                                     }
                                 ],
                             },
                         ],
                     },
+                    # ── 抽奖参数 ──
                     {
                         "component": "VRow",
                         "content": [
-                            # 抽奖间隔
                             {
                                 "component": "VCol",
-                                "props": {"cols": 12, "md": 4},
+                                "props": {"cols": 12, "sm": 4},
                                 "content": [
                                     {
                                         "component": "VTextField",
                                         "props": {
                                             "model": "interval",
-                                            "label": "抽奖间隔（秒）",
+                                            "label": "🎲 抽奖间隔（秒）",
                                             "placeholder": "8",
-                                            "hint": "默认 8 秒，被限流时自动增加",
-                                            "persistent-hint": True,
                                             "type": "number",
+                                            "hint": "被限流时自动增加",
+                                            "persistent-hint": True,
                                         },
                                     }
                                 ],
                             },
-                            # 最大抽奖次数
                             {
                                 "component": "VCol",
-                                "props": {"cols": 12, "md": 4},
+                                "props": {"cols": 12, "sm": 4},
                                 "content": [
                                     {
                                         "component": "VTextField",
                                         "props": {
                                             "model": "max_count",
-                                            "label": "最大抽奖次数",
+                                            "label": "🔢 最大抽奖次数",
                                             "placeholder": "0",
+                                            "type": "number",
                                             "hint": "0 = 不限制",
                                             "persistent-hint": True,
-                                            "type": "number",
                                         },
                                     }
                                 ],
                             },
-                            # 保留憨豆数
                             {
                                 "component": "VCol",
-                                "props": {"cols": 12, "md": 4},
+                                "props": {"cols": 12, "sm": 4},
                                 "content": [
                                     {
                                         "component": "VTextField",
                                         "props": {
                                             "model": "reserve_beans",
-                                            "label": "保留憨豆数",
+                                            "label": "💰 保留憨豆数",
                                             "placeholder": "0",
-                                            "hint": "余额低于此值停止，0 = 不限制",
-                                            "persistent-hint": True,
                                             "type": "number",
+                                            "hint": "低于此值停止，0 = 不限制",
+                                            "persistent-hint": True,
                                         },
                                     }
                                 ],
                             },
                         ],
                     },
+                    # ── 通知与清理 ──
                     {
                         "component": "VRow",
                         "content": [
-                            # 大奖关键词
                             {
                                 "component": "VCol",
-                                "props": {"cols": 12, "md": 8},
+                                "props": {"cols": 12, "sm": 4},
                                 "content": [
                                     {
-                                        "component": "VTextField",
+                                        "component": "VSwitch",
                                         "props": {
-                                            "model": "big_prize_keywords",
-                                            "label": "大奖关键词",
-                                            "placeholder": "VIP,邀请,500000",
-                                            "hint": "逗号分隔，命中立即通知并停止",
-                                            "persistent-hint": True,
+                                            "model": "notify",
+                                            "label": "📢 推送通知",
+                                            "color": "primary",
                                         },
                                     }
                                 ],
                             },
-                            # 自动清理站内信
                             {
                                 "component": "VCol",
-                                "props": {"cols": 12, "md": 4},
+                                "props": {"cols": 12, "sm": 4},
                                 "content": [
                                     {
                                         "component": "VSwitch",
                                         "props": {
                                             "model": "clean_mail",
-                                            "label": "自动清理站内信",
+                                            "label": "🧹 自动清理站内信",
+                                            "color": "primary",
+                                        },
+                                    }
+                                ],
+                            },
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "sm": 4},
+                                "content": [
+                                    {
+                                        "component": "VSwitch",
+                                        "props": {
+                                            "model": "onlyonce",
+                                            "label": "▶️ 立即运行一次",
+                                            "color": "warning",
                                         },
                                     }
                                 ],
                             },
                         ],
                     },
-                        ],
-                    },
-            # 油猴脚本备注
-            {
-                "component": "VRow",
-                "content": [
+                    # ── 大奖关键词 ──
                     {
-                        "component": "VCol",
-                        "props": {"cols": 12},
+                        "component": "VRow",
                         "content": [
                             {
-                                "component": "VAlert",
-                                "props": {
-                                    "type": "info",
-                                    "variant": "tonal",
-                                    "text": "💡 也可使用油猴脚本：HHCLUB 自动抽奖 · 庆典版 https://greasyfork.org/zh-CN/scripts/591722"
-                                }
+                                "component": "VCol",
+                                "props": {"cols": 12},
+                                "content": [
+                                    {
+                                        "component": "VTextField",
+                                        "props": {
+                                            "model": "big_prize_keywords",
+                                            "label": "🏆 大奖关键词",
+                                            "placeholder": "VIP,邀请,500000",
+                                            "hint": "逗号分隔，命中立即通知并停止抽奖",
+                                            "persistent-hint": True,
+                                        },
+                                    }
+                                ],
+                            },
+                        ],
+                    },
+                    # ── 脚本备注 ──
+                    {
+                        "component": "VRow",
+                        "content": [
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12},
+                                "content": [
+                                    {
+                                        "component": "VAlert",
+                                        "props": {
+                                            "type": "info",
+                                            "variant": "tonal",
+                                            "density": "compact",
+                                            "text": "💡 也可使用油猴脚本：HHCLUB 自动抽奖 · 庆典版 https://greasyfork.org/zh-CN/scripts/591722",
+                                        },
+                                    }
+                                ],
                             }
                         ]
-                    }
-                ]
-            },
+                    },
+                ],
+            }
         ]
 
-        # 默认值
         default_config = {
             "enabled": False,
             "cron": "5 0 * * *",
@@ -436,9 +437,8 @@ class HHLottery(_PluginBase):
 
     def get_page(self) -> List[dict]:
         """
-        统计页面（前端 Vuetify 组件）
+        统计页面（Vuetify 组件，适配移动端）
         """
-        # 读取统计数据
         data = self._load_data()
         stats = data.get("stats", {})
         history = data.get("history", [])
@@ -456,44 +456,43 @@ class HHLottery(_PluginBase):
         round_cost = round_stats.get("cost", 0)
         round_wins = round_stats.get("wins", 0)
 
-        # 构建奖品统计文本
+        # 奖品统计文本
         prize_lines = []
-        for prize_name, prize_count in sorted(prize_detail.items(), key=lambda x: -x[1]):
-            prize_lines.append(f"{prize_name} × {prize_count}")
+        for name, count in sorted(prize_detail.items(), key=lambda x: -x[1]):
+            prize_lines.append(f"• {name} × {count}")
+        prize_text = "\n".join(prize_lines) if prize_lines else "暂无记录"
 
-        # 最近中奖历史（最近 20 条）
-        recent_history = history[-20:][::-1]  # 倒序，最新在前
+        # 最近中奖（最新 20 条）
+        recent = history[-20:][::-1]
         history_lines = []
-        for item in recent_history:
-            ts = item.get("time", "")
+        for item in recent:
+            ts = item.get("time", "")[-8:]  # 只取时间部分
             prize = item.get("prize", "")
             history_lines.append(f"[{ts}] {prize}")
+        history_text = "\n".join(history_lines) if history_lines else "暂无记录"
 
-        # 页面组件
         page = [
+            # ── 顶部统计卡片 ──
             {
                 "component": "VRow",
                 "content": [
                     {
                         "component": "VCol",
-                        "props": {"cols": 12, "md": 3},
+                        "props": {"cols": 6, "sm": 3},
                         "content": [
                             {
                                 "component": "VCard",
-                                "props": {"variant": "outlined"},
+                                "props": {"variant": "tonal", "color": "primary"},
                                 "content": [
                                     {
-                                        "component": "VCardTitle",
-                                        "text": "📊 累计统计",
+                                        "component": "VCardText",
+                                        "props": {"class": "text-center"},
+                                        "text": f"🎲 {total_count:,}",
                                     },
                                     {
                                         "component": "VCardText",
-                                        "text": (
-                                            f"总抽奖次数：{total_count}\n"
-                                            f"总消耗憨豆：{total_cost:,}\n"
-                                            f"总中奖次数：{total_wins}\n"
-                                            f"当前余额：{last_balance:,}"
-                                        ),
+                                        "props": {"class": "text-center text-caption"},
+                                        "text": "总抽奖次数",
                                     },
                                 ],
                             }
@@ -501,7 +500,79 @@ class HHLottery(_PluginBase):
                     },
                     {
                         "component": "VCol",
-                        "props": {"cols": 12, "md": 3},
+                        "props": {"cols": 6, "sm": 3},
+                        "content": [
+                            {
+                                "component": "VCard",
+                                "props": {"variant": "tonal", "color": "warning"},
+                                "content": [
+                                    {
+                                        "component": "VCardText",
+                                        "props": {"class": "text-center"},
+                                        "text": f"💸 {total_cost:,}",
+                                    },
+                                    {
+                                        "component": "VCardText",
+                                        "props": {"class": "text-center text-caption"},
+                                        "text": "总消耗憨豆",
+                                    },
+                                ],
+                            }
+                        ],
+                    },
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 6, "sm": 3},
+                        "content": [
+                            {
+                                "component": "VCard",
+                                "props": {"variant": "tonal", "color": "success"},
+                                "content": [
+                                    {
+                                        "component": "VCardText",
+                                        "props": {"class": "text-center"},
+                                        "text": f"🏆 {total_wins:,}",
+                                    },
+                                    {
+                                        "component": "VCardText",
+                                        "props": {"class": "text-center text-caption"},
+                                        "text": "总中奖次数",
+                                    },
+                                ],
+                            }
+                        ],
+                    },
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 6, "sm": 3},
+                        "content": [
+                            {
+                                "component": "VCard",
+                                "props": {"variant": "tonal", "color": "info"},
+                                "content": [
+                                    {
+                                        "component": "VCardText",
+                                        "props": {"class": "text-center"},
+                                        "text": f"💰 {last_balance:,}",
+                                    },
+                                    {
+                                        "component": "VCardText",
+                                        "props": {"class": "text-center text-caption"},
+                                        "text": "当前余额",
+                                    },
+                                ],
+                            }
+                        ],
+                    },
+                ],
+            },
+            # ── 本轮统计 + 奖品统计 ──
+            {
+                "component": "VRow",
+                "content": [
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 12, "sm": 4},
                         "content": [
                             {
                                 "component": "VCard",
@@ -514,9 +585,9 @@ class HHLottery(_PluginBase):
                                     {
                                         "component": "VCardText",
                                         "text": (
-                                            f"抽奖次数：{round_count}\n"
+                                            f"抽奖次数：{round_count:,}\n"
                                             f"消耗憨豆：{round_cost:,}\n"
-                                            f"中奖次数：{round_wins}"
+                                            f"中奖次数：{round_wins:,}"
                                         ),
                                     },
                                 ],
@@ -525,7 +596,7 @@ class HHLottery(_PluginBase):
                     },
                     {
                         "component": "VCol",
-                        "props": {"cols": 12, "md": 3},
+                        "props": {"cols": 12, "sm": 8},
                         "content": [
                             {
                                 "component": "VCard",
@@ -533,42 +604,47 @@ class HHLottery(_PluginBase):
                                 "content": [
                                     {
                                         "component": "VCardTitle",
-                                        "text": "🏆 奖品统计",
+                                        "text": "🎁 奖品统计",
                                     },
                                     {
                                         "component": "VCardText",
-                                        "text": "\n".join(prize_lines) if prize_lines else "暂无记录",
-                                    },
-                                ],
-                            }
-                        ],
-                    },
-                    {
-                        "component": "VCol",
-                        "props": {"cols": 12, "md": 3},
-                        "content": [
-                            {
-                                "component": "VCard",
-                                "props": {"variant": "outlined"},
-                                "content": [
-                                    {
-                                        "component": "VCardTitle",
-                                        "text": "📜 最近中奖",
-                                    },
-                                    {
-                                        "component": "VCardText",
-                                        "text": "\n".join(history_lines) if history_lines else "暂无记录",
+                                        "text": prize_text,
                                     },
                                 ],
                             }
                         ],
                     },
                 ],
-            }
+            },
+            # ── 最近中奖记录 ──
+            {
+                "component": "VRow",
+                "content": [
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 12},
+                        "content": [
+                            {
+                                "component": "VCard",
+                                "props": {"variant": "outlined"},
+                                "content": [
+                                    {
+                                        "component": "VCardTitle",
+                                        "text": "📜 最近中奖记录",
+                                    },
+                                    {
+                                        "component": "VCardText",
+                                        "text": history_text,
+                                    },
+                                ],
+                            }
+                        ],
+                    },
+                ],
+            },
         ]
 
         return page
-
     def get_service(self) -> List[Dict[str, Any]]:
         """
         注册定时服务
