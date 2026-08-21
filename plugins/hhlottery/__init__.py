@@ -438,16 +438,22 @@ class HHLottery(_PluginBase):
     def get_page(self) -> List[dict]:
         """
         统计页面：
+        - 我的抽奖信息
         - 奖品名称汇总
         - 今日汇总（扇形图 + 标签）
         - 昨日汇总（扇形图 + 标签）
-        参考 playletlottery 的 UI 风格。
         """
         data = self._load_data()
         stats = data.get("stats", {})
         round_records = data.get("round_records", [])
 
-        # 全部奖品汇总
+        # 我的抽奖信息
+        last_balance = stats.get("last_balance", 0)
+        total_cost = stats.get("total_cost", 0)
+        total_count = stats.get("total_count", 0)
+        total_wins = stats.get("total_wins", 0)
+
+        # 奖品汇总
         all_counter = Counter()
         today = datetime.now().strftime("%Y-%m-%d")
         yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
@@ -480,33 +486,50 @@ class HHLottery(_PluginBase):
             }
 
         def chip_grid(items: List[dict]) -> List[dict]:
+            if not items or items[0].get('count') == '':
+                return [{"component": "div", "props": {"class": "text-body-2 text-medium-emphasis"}, "text": "暂无记录"}]
             return [
-                {
-                    "component": "VChip",
-                    "props": {"variant": "tonal", "color": "primary", "size": "small", "class": "ma-1"},
-                    "text": f"{item.get('name')} × {item.get('count')}"
-                }
+                {"component": "VChip", "props": {"variant": "tonal", "color": "primary", "size": "small", "class": "ma-1"}, "text": f"{item.get('name')} × {item.get('count')}"}
                 for item in items
-            ] if items and items[0].get('count') != '' else [
-                {"component": "div", "props": {"class": "text-body-2 text-medium-emphasis"}, "text": "暂无记录"}
             ]
 
-        def pie_chart(title: str, items: List[dict]) -> dict:
+        def summary_chart(title: str, items: List[dict]) -> dict:
             chart_items = [item for item in items if isinstance(item.get("count"), (int, float)) and item.get("count") > 0]
+            if not chart_items:
+                body = [{"component": "div", "props": {"class": "text-body-2 text-medium-emphasis"}, "text": "暂无数据"}]
+            else:
+                total = sum(item.get("count", 0) for item in chart_items)
+                body = [{
+                    "component": "div",
+                    "props": {"class": "d-flex flex-column gap-2"},
+                    "content": [
+                        {
+                            "component": "div",
+                            "content": [
+                                {
+                                    "component": "div",
+                                    "props": {"class": "d-flex align-center justify-space-between text-body-2 mb-1"},
+                                    "content": [
+                                        {"component": "span", "text": item.get("name")},
+                                        {"component": "span", "text": f"{item.get('count')}（{(item.get('count')/total*100):.1f}%）"},
+                                    ],
+                                },
+                                {
+                                    "component": "VProgressLinear",
+                                    "props": {"model-value": (item.get('count') / total * 100), "height": 10, "rounded": True, "color": "primary"},
+                                },
+                            ],
+                        }
+                        for item in chart_items[:8]
+                    ],
+                }]
             return {
-                "component": "VApexChart",
-                "props": {
-                    "height": 260,
-                    "options": {
-                        "chart": {"type": "pie"},
-                        "labels": [item.get("name") for item in chart_items],
-                        "title": {"text": title},
-                        "legend": {"show": True, "position": "bottom"},
-                        "plotOptions": {"pie": {"expandOnClick": False}},
-                        "noData": {"text": "暂无数据"},
-                    },
-                    "series": [item.get("count") for item in chart_items],
-                },
+                "component": "VCard",
+                "props": {"variant": "tonal", "class": "mb-3"},
+                "content": [
+                    {"component": "VCardTitle", "text": title},
+                    {"component": "VCardText", "content": body},
+                ],
             }
 
         all_items = summary_to_items(all_counter)
@@ -519,17 +542,14 @@ class HHLottery(_PluginBase):
                 "props": {"variant": "tonal", "class": "mb-4"},
                 "content": [
                     {"component": "VCardTitle", "text": "🎰 我的抽奖信息"},
-                    {
-                        "component": "VCardText",
-                        "content": [
-                            {"component": "VRow", "content": [
-                                info_col("💰 当前余额", f"{stats.get('last_balance', 0):,}", "info"),
-                                info_col("💸 总消耗", f"{stats.get('total_cost', 0):,}", "warning"),
-                                info_col("🎲 总抽奖", f"{stats.get('total_count', 0):,}", "primary"),
-                                info_col("🏆 总中奖", f"{stats.get('total_wins', 0):,}", "success"),
-                            ]},
-                        ],
-                    },
+                    {"component": "VCardText", "content": [
+                        {"component": "VRow", "content": [
+                            info_col("💰 当前余额", f"{last_balance:,}", "info"),
+                            info_col("💸 总消耗", f"{total_cost:,}", "warning"),
+                            info_col("🎲 总抽奖", f"{total_count:,}", "primary"),
+                            info_col("🏆 总中奖", f"{total_wins:,}", "success"),
+                        ]},
+                    ]},
                 ],
             },
             {
@@ -537,62 +557,37 @@ class HHLottery(_PluginBase):
                 "props": {"variant": "outlined", "class": "mb-4"},
                 "content": [
                     {"component": "VCardTitle", "text": "奖品名称汇总"},
-                    {
-                        "component": "VCardText",
-                        "content": [
-                            {"component": "div", "props": {"class": "text-caption text-medium-emphasis mb-2"}, "text": "全部轮次累计奖品标签"},
-                            {"component": "div", "props": {"class": "d-flex flex-wrap"}, "content": chip_grid(all_items)}
-                        ],
-                    },
+                    {"component": "VCardText", "content": [
+                        {"component": "div", "props": {"class": "text-caption text-medium-emphasis mb-2"}, "text": "全部轮次累计奖品标签"},
+                        {"component": "div", "props": {"class": "d-flex flex-wrap"}, "content": chip_grid(all_items)}
+                    ]},
                 ],
             },
             {
                 "component": "VRow",
                 "content": [
-                    {
-                        "component": "VCol",
-                        "props": {"cols": 12, "md": 6},
-                        "content": [
-                            {
-                                "component": "VCard",
-                                "props": {"variant": "tonal", "class": "h-100"},
-                                "content": [
-                                    {"component": "VCardTitle", "text": "今日汇总"},
-                                    {
-                                        "component": "VCardText",
-                                        "content": [
-                                            pie_chart("今日奖品分布", today_items),
-                                            {"component": "VDivider", "props": {"class": "my-3"}},
-                                            {"component": "div", "props": {"class": "text-caption text-medium-emphasis mb-2"}, "text": "今日奖品名称"},
-                                            {"component": "div", "props": {"class": "d-flex flex-wrap"}, "content": chip_grid(today_items)}
-                                        ],
-                                    },
-                                ],
-                            }
-                        ],
-                    },
-                    {
-                        "component": "VCol",
-                        "props": {"cols": 12, "md": 6},
-                        "content": [
-                            {
-                                "component": "VCard",
-                                "props": {"variant": "tonal", "class": "h-100"},
-                                "content": [
-                                    {"component": "VCardTitle", "text": "昨日汇总"},
-                                    {
-                                        "component": "VCardText",
-                                        "content": [
-                                            pie_chart("昨日奖品分布", yesterday_items),
-                                            {"component": "VDivider", "props": {"class": "my-3"}},
-                                            {"component": "div", "props": {"class": "text-caption text-medium-emphasis mb-2"}, "text": "昨日奖品名称"},
-                                            {"component": "div", "props": {"class": "d-flex flex-wrap"}, "content": chip_grid(yesterday_items)}
-                                        ],
-                                    },
-                                ],
-                            }
-                        ],
-                    },
+                    {"component": "VCol", "props": {"cols": 12, "md": 6}, "content": [
+                        {"component": "VCard", "props": {"variant": "tonal", "class": "h-100"}, "content": [
+                            {"component": "VCardTitle", "text": "今日汇总"},
+                            {"component": "VCardText", "content": [
+                                summary_chart("今日奖品分布", today_items),
+                                {"component": "VDivider", "props": {"class": "my-3"}},
+                                {"component": "div", "props": {"class": "text-caption text-medium-emphasis mb-2"}, "text": "今日奖品名称"},
+                                {"component": "div", "props": {"class": "d-flex flex-wrap"}, "content": chip_grid(today_items)}
+                            ]},
+                        ]}
+                    ]},
+                    {"component": "VCol", "props": {"cols": 12, "md": 6}, "content": [
+                        {"component": "VCard", "props": {"variant": "tonal", "class": "h-100"}, "content": [
+                            {"component": "VCardTitle", "text": "昨日汇总"},
+                            {"component": "VCardText", "content": [
+                                summary_chart("昨日奖品分布", yesterday_items),
+                                {"component": "VDivider", "props": {"class": "my-3"}},
+                                {"component": "div", "props": {"class": "text-caption text-medium-emphasis mb-2"}, "text": "昨日奖品名称"},
+                                {"component": "div", "props": {"class": "d-flex flex-wrap"}, "content": chip_grid(yesterday_items)}
+                            ]},
+                        ]}
+                    ]},
                 ],
             },
         ]
