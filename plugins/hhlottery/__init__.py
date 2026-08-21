@@ -585,6 +585,7 @@ class HHLottery(_PluginBase):
             "count": 0,
             "cost": 0,
             "wins": 0,
+            "start_balance": 0,
             "prize_detail": {},
             "history": [],
         }
@@ -615,6 +616,7 @@ class HHLottery(_PluginBase):
                 return
 
             logger.info(f"💰 当前余额：{balance:,} 憨豆，单次消耗：{cost_per_draw:,} 憨豆")
+            round_stats["start_balance"] = balance
 
             # 更新余额到统计
             self._update_stats_field("last_balance", balance)
@@ -744,11 +746,13 @@ class HHLottery(_PluginBase):
                     stop_reason = f"命中大奖：{prize_text}"
                     logger.info(f"🏆 {stop_reason}")
 
-                    # 立即通知
+                    # 立即通知（喜庆风格）
                     self._send_notification(
-                        f"🏆 HHCLUB 大奖通知\n"
-                        f"命中：{prize_text}\n"
-                        f"当前余额：{balance:,} 憨豆"
+                        f"🎊✨ 恭喜恭喜！天选之人！✨🎊\n\n"
+                        f"🏆 命中大奖：{prize_text}\n"
+                        f"💰 当前余额：{balance:,} 憨豆\n"
+                        f"🎲 本轮已抽：{draw_count} 次\n\n"
+                        f"🎯 建议去买彩票，今天运势拉满！"
                     )
                     break
 
@@ -1221,25 +1225,23 @@ class HHLottery(_PluginBase):
         """
         构建抽奖结束汇总消息
         """
-        lines = ["🎰 HHCLUB 抽奖结束\n"]
+        lines = ["🎉 憨憨幸运大转盘完成\n"]
+
+        lines.append(f"🎲 完成次数：{round_stats['count']:,}")
+        lines.append(f"💸 本轮消耗：{round_stats['cost']:,} 憨豆")
+        lines.append(f"🫘 开始余额：{round_stats.get('start_balance', 0):,} 憨豆")
 
         if stop_reason:
-            lines.append(f"⏹️ 停止原因：{stop_reason}\n")
+            lines.append(f"⏹️ {stop_reason}")
 
-        lines.append(f"📊 本轮统计：")
-        lines.append(f"  抽奖次数：{round_stats['count']}")
-        lines.append(f"  消耗憨豆：{round_stats['cost']:,}")
-        lines.append(f"  中奖次数：{round_stats['wins']}")
-        lines.append(f"  当前余额：{final_balance:,}")
-
-        # 奖品明细
+        # 奖品统计
         prize_detail = round_stats.get("prize_detail", {})
         if prize_detail:
-            lines.append(f"\n🏆 中奖明细：")
+            lines.append(f"\n🎁 奖品统计：")
             for name, count in sorted(
                 prize_detail.items(), key=lambda x: -x[1]
             ):
-                lines.append(f"  {name} × {count}")
+                lines.append(f"• {name} × {count}")
 
         return "\n".join(lines)
 
