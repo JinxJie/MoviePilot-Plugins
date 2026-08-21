@@ -717,19 +717,13 @@ class HHLottery(_PluginBase):
                 round_stats["count"] += 1
                 round_stats["cost"] += cost_per_draw
 
-                # 奖品统计
+                # 奖品统计（所有类型都记录）
                 if prize_type == "beans":
                     balance += prize_value
-                elif prize_type == "vip":
-                    round_stats["wins"] += 1
-                    round_stats["prize_detail"][prize_name] = (
-                        round_stats["prize_detail"].get(prize_name, 0) + 1
-                    )
-                elif prize_type in ("invite", "rainbow", "makeup", "upload"):
-                    round_stats["wins"] += 1
-                    round_stats["prize_detail"][prize_name] = (
-                        round_stats["prize_detail"].get(prize_name, 0) + 1
-                    )
+                round_stats["wins"] += 1
+                round_stats["prize_detail"][prize_name] = (
+                    round_stats["prize_detail"].get(prize_name, 0) + 1
+                )
 
                 # 记录历史
                 history_item = {
@@ -1229,7 +1223,7 @@ class HHLottery(_PluginBase):
 
         lines.append(f"🎲 完成次数：{round_stats['count']:,}")
         lines.append(f"💸 本轮消耗：{round_stats['cost']:,} 憨豆")
-        lines.append(f"🫘 开始余额：{round_stats.get('start_balance', 0):,} 憨豆")
+        lines.append(f"🫘 当前余额：{final_balance:,} 憨豆")
 
         if stop_reason:
             lines.append(f"⏹️ {stop_reason}")
