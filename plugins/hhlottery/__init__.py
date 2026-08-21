@@ -30,7 +30,7 @@ class HHLottery(_PluginBase):
 
     # 插件元信息
     plugin_name = "HHCLUB 自动抽奖"
-    plugin_desc = "HHCLUB 自动抽奖增强版 · 大奖即时通知、站内信自动清理、Cron 定时运行"
+    plugin_desc = "HHCLUB 自动抽奖增强版 · 大奖即时通知、站内信自动清理、Cron 定时运行 · 油猴脚本版：https://greasyfork.org/zh-CN/scripts/591722"
     plugin_icon = "hhlottery.png"
     plugin_version = "1.0.0"
     plugin_author = "JinxJie"
@@ -178,7 +178,6 @@ class HHLottery(_PluginBase):
                 "method": "GET",
                 "func": self._api_get_stats,
             },
-            {
         ]
 
     def get_form(self) -> Tuple[List[dict], Dict[str, Any]]:
