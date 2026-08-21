@@ -119,6 +119,8 @@ class HHLottery(_PluginBase):
             self._grand_stop = config.get("grand_stop", True)
             self._gambler_mode = config.get("gambler_mode", False)
             self._onlyonce = config.get("onlyonce", False)
+            if self._gambler_mode:
+                self._max_count = 0
 
         # 如果设置了立即运行
         if self._onlyonce and self._cookie:
@@ -130,7 +132,7 @@ class HHLottery(_PluginBase):
                 "cookie": self._cookie,
                 "site_url": self._site_url,
                 "interval": self._interval,
-                "max_count": self._max_count,
+                "max_count": 0 if self._gambler_mode else self._max_count,
                 "reserve_beans": self._reserve_beans,
                 "notify": self._notify,
                 "big_prize_keywords": self._big_prize_keywords,
@@ -305,7 +307,7 @@ class HHLottery(_PluginBase):
                                             "label": "🔢 最大抽奖次数",
                                             "placeholder": "0",
                                             "type": "number",
-                                            "hint": "0 = 不限制",
+                                            "hint": "0 = 不限制；赌徒模式开启时自动忽略",
                                             "persistent-hint": True,
                                         },
                                     }
@@ -385,7 +387,7 @@ class HHLottery(_PluginBase):
                                             "model": "gambler_mode",
                                             "label": "🎲 赌徒模式",
                                             "color": "warning",
-                                            "hint": "覆盖大奖止损：开启后命中大奖也继续抽",
+                                            "hint": "开启后：命中大奖也继续抽，且最大抽奖次数按 0 处理",
                                             "persistent-hint": True,
                                         },
                                     }
@@ -679,7 +681,9 @@ class HHLottery(_PluginBase):
                 return
 
             logger.info(f"💰 当前余额：{balance:,} 憨豆，单次消耗：{cost_per_draw:,} 憨豆")
-            logger.info(f"⚙️ 开关状态：大奖止损={self._grand_stop}，赌徒模式={self._gambler_mode}，目标关键词={self._big_prize_keywords}，保留憨豆={self._reserve_beans}")
+            logger.info(f"⚙️ 开关状态：大奖止损={self._grand_stop}，赌徒模式={self._gambler_mode}，目标关键词={self._big_prize_keywords}，保留憨豆={self._reserve_beans}，最大次数={self._max_count}")
+            if self._gambler_mode:
+                logger.info("🎲 赌徒模式已开启：最大抽奖次数将按 0 处理并锁定为不可修改")
             round_stats["start_balance"] = balance
             before_balance = balance
             vip_converted_total = 0
@@ -702,7 +706,7 @@ class HHLottery(_PluginBase):
                     break
 
                 # 检查停止条件：最大次数
-                if self._max_count > 0 and draw_count >= self._max_count:
+                if not self._gambler_mode and self._max_count > 0 and draw_count >= self._max_count:
                     stop_reason = f"达到最大抽奖次数（{self._max_count}）"
                     break
 
