@@ -30,7 +30,7 @@ class HHLottery(_PluginBase):
 
     # 插件元信息
     plugin_name = "HHCLUB 自动抽奖"
-    plugin_desc = "HHCLUB 自动抽奖增强版 · 支持大奖即时通知、站内信自动清理、Cron 定时运行 · 油猴脚本版：https://greasyfork.org/zh-CN/scripts/591722"
+    plugin_desc = "HHCLUB 自动抽奖增强版 · 大奖即时通知、站内信自动清理、Cron 定时运行 · 油猴脚本版：https://greasyfork.org/zh-CN/scripts/591722"
     plugin_icon = "hhlottery.svg"
     plugin_version = "1.0.0"
     plugin_author = "JinxJie"
@@ -412,26 +412,6 @@ class HHLottery(_PluginBase):
             "onlyonce": False,
         }
 
-            # 油猴脚本备注
-            {
-                "component": "VRow",
-                "content": [
-                    {
-                        "component": "VCol",
-                        "props": {"cols": 12},
-                        "content": [
-                            {
-                                "component": "VAlert",
-                                "props": {
-                                    "type": "info",
-                                    "variant": "tonal",
-                                    "text": "💡 本插件功能移植自油猴脚本，也可直接使用脚本版：https://greasyfork.org/zh-CN/scripts/591722"
-                                }
-                            }
-                        ]
-                    }
-                ]
-            },
         return form, default_config
 
     def get_page(self) -> List[dict]:
@@ -904,16 +884,16 @@ class HHLottery(_PluginBase):
     def _clean_messages(self):
         """
         清理站内信（包含"幸运大转盘"主题的信件）
-        逻辑完全复刻油猴脚本 sweepLotteryMail：反复清第一页直到没有目标信
-        解析逻辑复刻油猴脚本 parseMailboxPage + isLotteryMail
+        完全复刻油猴脚本 sweepLotteryMail + parseMailboxPage + isLotteryMail
+        反复清第一页，因为删掉后后面的信会移到第一页
         """
         logger.info("🧹 开始清理站内信...")
         MAIL_KEYWORD = "幸运大转盘"
-        MAX_ROUNDS = 20  # 最多反复检查第一页次数
+        MAX_ROUNDS = 20
         total_deleted = 0
 
         try:
-            # 反复清第一页（删掉后后面的信会移到第一页）
+            # 反复清第一页（复刻油猴脚本 sweepLotteryMail）
             for round_num in range(1, MAX_ROUNDS + 1):
                 url = (
                     f"{self._site_url}/messages.php?"
@@ -931,7 +911,7 @@ class HHLottery(_PluginBase):
                 res = req.get_res(url=url)
 
                 if res is None:
-                    logger.warning(f"🧹 第一页请求失败（返回 None）")
+                    logger.warning("🧹 第一页请求失败（返回 None）")
                     break
 
                 if hasattr(res, "status_code") and res.status_code in (301, 302):
@@ -944,20 +924,26 @@ class HHLottery(_PluginBase):
                     logger.warning(f"🧹 第一页内容过短（{len(html)} 字节）")
                     break
 
-                # ── 解析信件（复刻油猴脚本 parseMailboxPage）──
+                # ── 解析信件（参考油猴脚本 parseMailboxPage）──
                 # 每封信的结构：
                 #   <input type="checkbox" name="messages[]" value="12345">
                 #   ... 所在行里有 <a href="...viewmessage...">主题文本</a>
+                #
+                # 步骤1：按 <input name="messages[]" value="ID"> 切分页面
+                # 步骤2：对每段，找最近的 viewmessage 链接文本
 
+                # 用正则找到所有 input checkbox 的 value
                 input_pattern = re.compile(
                     r'<input[^>]*name=["\']messages\[\]["\'][^>]*value=["\']?(\d+)["\']?',
                     re.IGNORECASE
                 )
+                # 找所有 viewmessage 链接及其文本
                 link_pattern = re.compile(
                     r'<a[^>]*href=["\'][^"\']*viewmessage[^"\']*["\'][^>]*>([^<]+)</a>',
                     re.IGNORECASE
                 )
 
+                # 把页面按 input 切分，每段包含该 input 及其后续内容（到下一个 input 为止）
                 input_matches = list(input_pattern.finditer(html))
                 if not input_matches:
                     # 备用：value 在前 name 在后
@@ -972,14 +958,15 @@ class HHLottery(_PluginBase):
                     break
 
                 # 对每个 input，取它到下一个 input 之间的文本，找 viewmessage 链接
-                # 复刻油猴脚本 isLotteryMail
                 delete_ids = []
                 for i, m in enumerate(input_matches):
                     msg_id = m.group(1)
+                    # 取当前 input 到下一个 input 之间的文本
                     start = m.start()
                     end = input_matches[i + 1].start() if i + 1 < len(input_matches) else len(html)
                     segment = html[start:end]
 
+                    # 在这段里找 viewmessage 链接的文本
                     link_match = link_pattern.search(segment)
                     if link_match:
                         subject = link_match.group(1).strip()
@@ -990,7 +977,7 @@ class HHLottery(_PluginBase):
                     logger.info(f"🧹 第 {round_num} 轮：第一页无「{MAIL_KEYWORD}」信件，清理完成")
                     break
 
-                # 删除匹配的信件（复刻油猴脚本 deleteMail）
+                # 删除匹配的信件
                 del_data = "action=moveordel"
                 for mid in delete_ids:
                     del_data += f"&messages%5B%5D={mid}"
