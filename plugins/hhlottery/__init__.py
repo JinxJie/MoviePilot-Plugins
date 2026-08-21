@@ -884,6 +884,7 @@ class HHLottery(_PluginBase):
     def _clean_messages(self):
         """
         清理站内信（包含"幸运大转盘"主题的信件）
+        解析逻辑参考油猴脚本 parseMailboxPage + isLotteryMail
         """
         logger.info("🧹 开始清理站内信...")
         total_deleted = 0
@@ -910,7 +911,6 @@ class HHLottery(_PluginBase):
                     logger.warning(f"🧹 第 {page_num} 页请求失败（返回 None）")
                     break
 
-                # 检查是否重定向到登录页
                 if hasattr(res, "status_code") and res.status_code in (301, 302):
                     logger.warning("🧹 Cookie 已过期，被重定向到登录页")
                     break
@@ -921,31 +921,54 @@ class HHLottery(_PluginBase):
                     logger.warning(f"🧹 第 {page_num} 页内容过短（{len(html)} 字节）")
                     break
 
-                # 提取所有信件 ID
-                all_ids = re.findall(
-                    r'name=["\']messages\[\]["\'][^>]*value=["\']?(\d+)["\']?',
-                    html
-                )
-                if not all_ids:
-                    # 备用匹配
-                    all_ids = re.findall(r'value=["\']?(\d+)["\']?[^>]*name=["\']messages\[\]', html)
+                # ── 解析信件（参考油猴脚本 parseMailboxPage）──
+                # 每封信的结构：
+                #   <input type="checkbox" name="messages[]" value="12345">
+                #   ... 所在行里有 <a href="...viewmessage...">主题文本</a>
+                #
+                # 步骤1：按 <input name="messages[]" value="ID"> 切分页面
+                # 步骤2：对每段，找最近的 viewmessage 链接文本
 
-                if not all_ids:
+                # 用正则找到所有 input checkbox 的 value
+                input_pattern = re.compile(
+                    r'<input[^>]*name=["\']messages\[\]["\'][^>]*value=["\']?(\d+)["\']?',
+                    re.IGNORECASE
+                )
+                # 找所有 viewmessage 链接及其文本
+                link_pattern = re.compile(
+                    r'<a[^>]*href=["\'][^"\']*viewmessage[^"\']*["\'][^>]*>([^<]+)</a>',
+                    re.IGNORECASE
+                )
+
+                # 把页面按 input 切分，每段包含该 input 及其后续内容（到下一个 input 为止）
+                input_matches = list(input_pattern.finditer(html))
+                if not input_matches:
+                    # 备用：value 在前 name 在后
+                    input_pattern2 = re.compile(
+                        r'<input[^>]*value=["\']?(\d+)["\']?[^>]*name=["\']messages\[\]',
+                        re.IGNORECASE
+                    )
+                    input_matches = list(input_pattern2.finditer(html))
+
+                if not input_matches:
                     logger.info(f"🧹 第 {page_num} 页无信件 ID，停止")
                     break
 
-                # 逐个检查信件是否包含关键词
+                # 对每个 input，取它到下一个 input 之间的文本，找 viewmessage 链接
                 delete_ids = []
-                for mid in all_ids:
-                    # 在页面中查找该 ID 附近的上下文（前后 2000 字符）
-                    idx = html.find(f'value="{mid}"')
-                    if idx < 0:
-                        idx = html.find(f"value='{mid}'")
-                    if idx < 0:
-                        continue
-                    context = html[max(0, idx - 500):idx + 2000]
-                    if MAIL_KEYWORD in context:
-                        delete_ids.append(mid)
+                for i, m in enumerate(input_matches):
+                    msg_id = m.group(1)
+                    # 取当前 input 到下一个 input 之间的文本
+                    start = m.start()
+                    end = input_matches[i + 1].start() if i + 1 < len(input_matches) else len(html)
+                    segment = html[start:end]
+
+                    # 在这段里找 viewmessage 链接的文本
+                    link_match = link_pattern.search(segment)
+                    if link_match:
+                        subject = link_match.group(1).strip()
+                        if MAIL_KEYWORD in subject:
+                            delete_ids.append(msg_id)
 
                 if not delete_ids:
                     logger.info(f"🧹 第 {page_num} 页无「{MAIL_KEYWORD}」信件，停止")
@@ -974,7 +997,7 @@ class HHLottery(_PluginBase):
                 status = resp.status_code if resp and hasattr(resp, "status_code") else "?"
                 logger.info(f"🧹 第 {page_num} 页删除 {len(delete_ids)} 封站内信（HTTP {status}）")
                 total_deleted += len(delete_ids)
-                time.sleep(1)  # 避免请求过快
+                time.sleep(1)
 
         except Exception as e:
             logger.error(f"清理站内信异常：{e}", exc_info=True)
