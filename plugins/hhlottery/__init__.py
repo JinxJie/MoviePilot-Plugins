@@ -35,7 +35,7 @@ class HHLottery(_PluginBase):
     # 插件元信息
     plugin_name = "HHCLUB 自动抽奖"
     plugin_desc = "HHCLUB 自动抽奖增强版，支持大奖即时通知、站内信自动清理、Cron 定时运行"
-    plugin_icon = "🎲"
+    plugin_icon = "hhlottery.svg"
     plugin_version = "1.0.0"
     plugin_author = "JinxJie"
     author_url = "https://github.com/JinxJie"
