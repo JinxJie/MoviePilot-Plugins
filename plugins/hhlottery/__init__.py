@@ -437,51 +437,39 @@ class HHLottery(_PluginBase):
 
     def get_page(self) -> List[dict]:
         """
-        统计页面（借鉴 playletlottery UI）
-        仅展示：我的抽奖信息 + 奖品名称汇总 + 今日汇总/昨日汇总（扇形图 + 标签网格）
+        统计页面：
+        - 奖品名称汇总
+        - 今日汇总（扇形图 + 标签）
+        - 昨日汇总（扇形图 + 标签）
+        参考 playletlottery 的 UI 风格。
         """
         data = self._load_data()
         stats = data.get("stats", {})
-        history = data.get("history", [])
         round_records = data.get("round_records", [])
 
-        # 累计统计
-        total_count = stats.get("total_count", 0)
-        total_cost = stats.get("total_cost", 0)
-        total_wins = stats.get("total_wins", 0)
-        total_earned = stats.get("total_earned", 0)
-        last_balance = stats.get("last_balance", 0)
-
-        # 轮次数据
-        round_number = data.get("round_count", len(round_records))
-        round_stats = stats.get("round", {})
-        round_pnl = round_stats.get("pnl", 0)
-        round_time = round_stats.get("time", "")[5:16]
-
-        pnl_text = f"+{round_pnl:,} 憨豆" if round_pnl >= 0 else f"{round_pnl:,} 憨豆"
-        pnl_class = "text-h5 font-weight-bold text-success" if round_pnl >= 0 else "text-h5 font-weight-bold text-error"
-
-        # 记录转为“日期 -> 奖品Counter”
+        # 全部奖品汇总
+        all_counter = Counter()
         today = datetime.now().strftime("%Y-%m-%d")
         yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
         day_buckets = {today: Counter(), yesterday: Counter()}
+
         for rec in round_records:
             rec_date = str(rec.get("time") or "")[:10]
-            if rec_date in day_buckets:
-                for name, cnt in (rec.get("prizes") or {}).items():
+            prizes = rec.get("prizes") or {}
+            for name, cnt in prizes.items():
+                all_counter[name] += cnt
+                if rec_date in day_buckets:
                     day_buckets[rec_date][name] += cnt
 
-        today_items = self.__summary_to_items(day_buckets[today])
-        yesterday_items = self.__summary_to_items(day_buckets[yesterday])
+        def summary_to_items(counter: Counter) -> List[dict]:
+            if not counter:
+                return [{"name": "无抽奖记录", "count": ""}]
+            return [
+                {"name": name, "count": count}
+                for name, count in sorted(counter.items(), key=lambda item: item[1], reverse=True)
+            ]
 
-        # 奖品名称汇总（全部轮次）
-        all_counter = Counter()
-        for rec in round_records:
-            for name, cnt in (rec.get("prizes") or {}).items():
-                all_counter[name] += cnt
-        all_items = self.__summary_to_items(all_counter)
-
-        def info_col(label: str, value: str, color: str = "primary") -> dict:
+        def info_col(label: str, value: str, color: str) -> dict:
             return {
                 "component": "VCol",
                 "props": {"cols": 6, "sm": 3},
@@ -491,8 +479,41 @@ class HHLottery(_PluginBase):
                 ],
             }
 
+        def chip_grid(items: List[dict]) -> List[dict]:
+            return [
+                {
+                    "component": "VChip",
+                    "props": {"variant": "tonal", "color": "primary", "size": "small", "class": "ma-1"},
+                    "text": f"{item.get('name')} × {item.get('count')}"
+                }
+                for item in items
+            ] if items and items[0].get('count') != '' else [
+                {"component": "div", "props": {"class": "text-body-2 text-medium-emphasis"}, "text": "暂无记录"}
+            ]
+
+        def pie_chart(title: str, items: List[dict]) -> dict:
+            chart_items = [item for item in items if isinstance(item.get("count"), (int, float)) and item.get("count") > 0]
+            return {
+                "component": "VApexChart",
+                "props": {
+                    "height": 260,
+                    "options": {
+                        "chart": {"type": "pie"},
+                        "labels": [item.get("name") for item in chart_items],
+                        "title": {"text": title},
+                        "legend": {"show": True, "position": "bottom"},
+                        "plotOptions": {"pie": {"expandOnClick": False}},
+                        "noData": {"text": "暂无数据"},
+                    },
+                    "series": [item.get("count") for item in chart_items],
+                },
+            }
+
+        all_items = summary_to_items(all_counter)
+        today_items = summary_to_items(day_buckets[today])
+        yesterday_items = summary_to_items(day_buckets[yesterday])
+
         page = [
-            # 我的抽奖信息
             {
                 "component": "VCard",
                 "props": {"variant": "tonal", "class": "mb-4"},
@@ -502,44 +523,29 @@ class HHLottery(_PluginBase):
                         "component": "VCardText",
                         "content": [
                             {"component": "VRow", "content": [
-                                info_col("💰 当前余额", f"{last_balance:,}", "info"),
-                                info_col("💸 总消耗", f"{total_cost:,}", "warning"),
-                                info_col("🎲 总抽奖", f"{total_count:,}", "primary"),
-                                info_col("🏆 总中奖", f"{total_wins:,}", "success"),
+                                info_col("💰 当前余额", f"{stats.get('last_balance', 0):,}", "info"),
+                                info_col("💸 总消耗", f"{stats.get('total_cost', 0):,}", "warning"),
+                                info_col("🎲 总抽奖", f"{stats.get('total_count', 0):,}", "primary"),
+                                info_col("🏆 总中奖", f"{stats.get('total_wins', 0):,}", "success"),
                             ]},
                         ],
                     },
                 ],
             },
-            # 奖品名称汇总
             {
                 "component": "VCard",
                 "props": {"variant": "outlined", "class": "mb-4"},
                 "content": [
-                    {"component": "VCardTitle", "text": "🎁 奖品名称汇总"},
+                    {"component": "VCardTitle", "text": "奖品名称汇总"},
                     {
                         "component": "VCardText",
                         "content": [
                             {"component": "div", "props": {"class": "text-caption text-medium-emphasis mb-2"}, "text": "全部轮次累计奖品标签"},
-                            {
-                                "component": "div",
-                                "props": {"class": "d-flex flex-wrap"},
-                                "content": [
-                                    {
-                                        "component": "VChip",
-                                        "props": {"variant": "tonal", "color": "primary", "size": "small", "class": "ma-1"},
-                                        "text": f"{item.get('name')} × {item.get('count')}"
-                                    }
-                                    for item in all_items
-                                ] if all_items else [
-                                    {"component": "div", "props": {"class": "text-body-2 text-medium-emphasis"}, "text": "暂无记录"}
-                                ]
-                            }
+                            {"component": "div", "props": {"class": "d-flex flex-wrap"}, "content": chip_grid(all_items)}
                         ],
                     },
                 ],
             },
-            # 今日/昨日汇总
             {
                 "component": "VRow",
                 "content": [
@@ -555,17 +561,10 @@ class HHLottery(_PluginBase):
                                     {
                                         "component": "VCardText",
                                         "content": [
-                                            self.__summary_chart("今日奖品分布", today_items),
+                                            pie_chart("今日奖品分布", today_items),
                                             {"component": "VDivider", "props": {"class": "my-3"}},
                                             {"component": "div", "props": {"class": "text-caption text-medium-emphasis mb-2"}, "text": "今日奖品名称"},
-                                            {
-                                                "component": "div",
-                                                "props": {"class": "d-flex flex-wrap"},
-                                                "content": [
-                                                    {"component": "VChip", "props": {"variant": "tonal", "color": "primary", "size": "small", "class": "ma-1"}, "text": f"{item.get('name')} × {item.get('count')}"}
-                                                    for item in today_items
-                                                ] if today_items else [{"component": "div", "props": {"class": "text-body-2 text-medium-emphasis"}, "text": "暂无记录"}]
-                                            }
+                                            {"component": "div", "props": {"class": "d-flex flex-wrap"}, "content": chip_grid(today_items)}
                                         ],
                                     },
                                 ],
@@ -584,17 +583,10 @@ class HHLottery(_PluginBase):
                                     {
                                         "component": "VCardText",
                                         "content": [
-                                            self.__summary_chart("昨日奖品分布", yesterday_items),
+                                            pie_chart("昨日奖品分布", yesterday_items),
                                             {"component": "VDivider", "props": {"class": "my-3"}},
                                             {"component": "div", "props": {"class": "text-caption text-medium-emphasis mb-2"}, "text": "昨日奖品名称"},
-                                            {
-                                                "component": "div",
-                                                "props": {"class": "d-flex flex-wrap"},
-                                                "content": [
-                                                    {"component": "VChip", "props": {"variant": "tonal", "color": "primary", "size": "small", "class": "ma-1"}, "text": f"{item.get('name')} × {item.get('count')}"}
-                                                    for item in yesterday_items
-                                                ] if yesterday_items else [{"component": "div", "props": {"class": "text-body-2 text-medium-emphasis"}, "text": "暂无记录"}]
-                                            }
+                                            {"component": "div", "props": {"class": "d-flex flex-wrap"}, "content": chip_grid(yesterday_items)}
                                         ],
                                     },
                                 ],
@@ -604,116 +596,6 @@ class HHLottery(_PluginBase):
                 ],
             },
         ]
-
-        return page
-        def info_col(label: str, value: str, color: str = "primary") -> dict:
-            return {
-                "component": "VCol",
-                "props": {"cols": 6, "sm": 3},
-                "content": [
-                    {
-                        "component": "div",
-                        "props": {"class": "text-caption text-medium-emphasis"},
-                        "text": label,
-                    },
-                    {
-                        "component": "div",
-                        "props": {"class": f"text-h6 font-weight-bold text-{color}"},
-                        "text": value,
-                    },
-                ],
-            }
-
-        page = [
-            # ── 顶部信息卡：我的抽奖信息 ──
-            {
-                "component": "VCard",
-                "props": {"variant": "tonal", "class": "mb-4"},
-                "content": [
-                    {
-                        "component": "VCardTitle",
-                        "text": "🎰 我的抽奖信息",
-                    },
-                    {
-                        "component": "VCardText",
-                        "content": [
-                            {
-                                "component": "VRow",
-                                "content": [
-                                    info_col("💰 当前余额", f"{last_balance:,}", "info"),
-                                    info_col("💸 总消耗", f"{total_cost:,}", "warning"),
-                                    info_col("🎲 总抽奖", f"{total_count:,}", "primary"),
-                                    info_col("🏆 总中奖", f"{total_wins:,}", "success"),
-                                ],
-                            },
-                        ],
-                    },
-                ],
-            },
-            # ── 本轮统计 ──
-            {
-                "component": "VCard",
-                "props": {"variant": "tonal", "class": "mb-4"},
-                "content": [
-                    {
-                        "component": "VCardTitle",
-                        "text": f"🔄 本轮统计 · 第 {round_number} 轮",
-                    },
-                    {
-                        "component": "VCardText",
-                        "content": [
-                            {
-                                "component": "div",
-                                "props": {"class": "text-caption text-medium-emphasis mb-1"},
-                                "text": f"时间：{round_time}",
-                            },
-                            {
-                                "component": "div",
-                                "props": {"class": pnl_class},
-                                "text": pnl_text,
-                            },
-                            {
-                                "component": "div",
-                                "props": {"class": "text-body-2 mt-1"},
-                                "text": f"🎲 抽奖 {round_count:,} 次 · 🏆 中奖 {round_wins:,} 次",
-                            },
-                        ],
-                    },
-                ],
-            },
-            # ── 奖品统计（按轮次）──
-            {
-                "component": "VCard",
-                "props": {"variant": "outlined", "class": "mb-4"},
-                "content": [
-                    {
-                        "component": "VCardTitle",
-                        "text": "🎁 奖品统计（最近 50 轮）",
-                    },
-                    {
-                        "component": "VCardText",
-                        "content": round_blocks,
-                    },
-                ],
-            },
-            # ── 最近中奖（日志式）──
-            {
-                "component": "VCard",
-                "props": {"variant": "outlined"},
-                "content": [
-                    {
-                        "component": "VCardTitle",
-                        "text": "📜 最近中奖",
-                    },
-                    {
-                        "component": "VCardText",
-                        "props": {"class": "text-body-2"},
-                        "text": log_text,
-                    },
-                ],
-            },
-        ]
-
         return page
     def get_service(self) -> List[Dict[str, Any]]:
         """
