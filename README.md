@@ -12,10 +12,10 @@
 
 ## 使用方法
 
-在 MoviePilot **设置 → 插件 → 第三方插件源** 中添加本仓库地址：
+在 MoviePilot **设置 → 插件 → 插件市场设置** 中添加本仓库地址：
 
 ```
-https://raw.githubusercontent.com/JinxJie/MoviePilot-Plugins/main/package.json
+https://github.com/JinxJie/MoviePilot-Plugins
 ```
 
 ## HHCLUB 自动抽奖
