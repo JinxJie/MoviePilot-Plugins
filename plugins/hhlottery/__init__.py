@@ -80,7 +80,7 @@ class HHLottery(_PluginBase):
     MAIL_CLEAN_INTERVAL = 20
 
     # 大额憨豆阈值
-    BIG_BEANS_THRESHOLD = 500000
+    BIG_BEANS_THRESHOLD = 780000
 
     # ======================== 实例变量 ========================
 
@@ -93,7 +93,7 @@ class HHLottery(_PluginBase):
     _max_count: int = 0
     _reserve_beans: int = 0
     _notify: bool = True
-    _big_prize_keywords: str = "VIP,邀请,500000"
+    _big_prize_keywords: str = "VIP,邀请,780000"
     _clean_mail: bool = True
     _onlyonce: bool = False
 
@@ -386,7 +386,7 @@ class HHLottery(_PluginBase):
                                         "props": {
                                             "model": "big_prize_keywords",
                                             "label": "🏆 大奖关键词",
-                                            "placeholder": "VIP,邀请,500000",
+                                            "placeholder": "VIP,邀请,780000",
                                             "hint": "逗号分隔，命中立即通知并停止抽奖",
                                             "persistent-hint": True,
                                         },
@@ -429,7 +429,7 @@ class HHLottery(_PluginBase):
             "max_count": 0,
             "reserve_beans": 0,
             "notify": True,
-            "big_prize_keywords": "VIP,邀请,500000",
+            "big_prize_keywords": "VIP,邀请,780000",
             "clean_mail": True,
             "onlyonce": False,
         }
@@ -1118,7 +1118,7 @@ class HHLottery(_PluginBase):
         大奖条件：
         - VIP 会员
         - 邀请卡
-        - 大额憨豆（≥500000）
+        - 大额憨豆（≥780000）
         - 命中自定义关键词
         """
         # VIP
