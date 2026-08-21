@@ -12,7 +12,8 @@ HHCLUB 自动抽奖插件 - MoviePilot V2/V3 兼容
 import re
 import time
 import json
-from datetime import datetime
+from collections import Counter
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.core.config import settings
