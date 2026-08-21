@@ -881,16 +881,16 @@ class HHLottery(_PluginBase):
         except Exception as e:
             logger.error(f"获取余额异常：{e}")
             return None, 0
-
     def _clean_messages(self):
         """
         清理站内信（包含"幸运大转盘"主题的信件）
         """
         logger.info("🧹 开始清理站内信...")
         total_deleted = 0
+        MAIL_KEYWORD = "幸运大转盘"
 
         try:
-            for page_num in range(1, 10):  # 最多清理 10 页
+            for page_num in range(1, 20):  # 最多清理 20 页
                 url = (
                     f"{self._site_url}/messages.php?"
                     f"action=viewmailbox&box=1&page={page_num}"
@@ -907,69 +907,82 @@ class HHLottery(_PluginBase):
                 res = req.get_res(url=url)
 
                 if res is None:
+                    logger.warning(f"🧹 第 {page_num} 页请求失败（返回 None）")
+                    break
+
+                # 检查是否重定向到登录页
+                if hasattr(res, "status_code") and res.status_code in (301, 302):
+                    logger.warning("🧹 Cookie 已过期，被重定向到登录页")
                     break
 
                 html = res.text if hasattr(res, "text") else str(res)
 
-                # 解析信件 ID
-                # 匹配 <input type="checkbox" name="messages[]" value="ID">
-                message_ids = re.findall(
-                    r'name=["\']messages\[\]["\'][^>]*value=["\'](\d+)["\']', html
-                )
-
-                if not message_ids:
+                if len(html) < 100:
+                    logger.warning(f"🧹 第 {page_num} 页内容过短（{len(html)} 字节）")
                     break
 
-                # 解析信件主题，筛选包含"幸运大转盘"的
-                # 匹配行结构：<td>...<a>主题</a>...</td>
-                # 简化方式：查找 messages[] 附近的主题文本
-                delete_ids = []
+                # 提取所有信件 ID
+                all_ids = re.findall(
+                    r'name=["\']messages\[\]["\'][^>]*value=["\']?(\d+)["\']?',
+                    html
+                )
+                if not all_ids:
+                    # 备用匹配
+                    all_ids = re.findall(r'value=["\']?(\d+)["\']?[^>]*name=["\']messages\[\]', html)
 
-                for msg_id in message_ids:
-                    # 查找该信件 ID 附近的主题内容
-                    # 模式：<input ... value="ID"> 后面跟着 <a> 主题 </a>
-                    pattern = (
-                        rf'value=["\']?{re.escape(msg_id)}["\']?'
-                        r'.*?<(?:a|td)[^>]*>([^<]*(?:幸运大转盘)[^<]*)</(?:a|td)>'
-                    )
-                    if re.search(pattern, html, re.DOTALL | re.IGNORECASE):
-                        delete_ids.append(msg_id)
+                if not all_ids:
+                    logger.info(f"🧹 第 {page_num} 页无信件 ID，停止")
+                    break
+
+                # 逐个检查信件是否包含关键词
+                delete_ids = []
+                for mid in all_ids:
+                    # 在页面中查找该 ID 附近的上下文（前后 2000 字符）
+                    idx = html.find(f'value="{mid}"')
+                    if idx < 0:
+                        idx = html.find(f"value='{mid}'")
+                    if idx < 0:
+                        continue
+                    context = html[max(0, idx - 500):idx + 2000]
+                    if MAIL_KEYWORD in context:
+                        delete_ids.append(mid)
+
+                if not delete_ids:
+                    logger.info(f"🧹 第 {page_num} 页无「{MAIL_KEYWORD}」信件，停止")
+                    break
 
                 # 删除匹配的信件
-                if delete_ids:
-                    del_data = "action=moveordel"
-                    for mid in delete_ids:
-                        del_data += f"&messages%5B%5D={mid}"
-                    del_data += "&delete=%E5%88%A0%E9%99%A4"  # "删除" URL 编码
+                del_data = "action=moveordel"
+                for mid in delete_ids:
+                    del_data += f"&messages%5B%5D={mid}"
+                del_data += "&delete=%E5%88%A0%E9%99%A4"  # "删除" URL 编码
 
-                    headers_post = {
-                        "User-Agent": self.DEFAULT_UA,
-                        "content-type": "application/x-www-form-urlencoded",
-                        "referer": url,
-                    }
+                headers_post = {
+                    "User-Agent": self.DEFAULT_UA,
+                    "content-type": "application/x-www-form-urlencoded",
+                    "referer": url,
+                }
 
-                    req_post = RequestUtils(
-                        headers=headers_post,
-                        cookies=self._cookie,
-                    )
-                    req_post.post_res(
-                        url=f"{self._site_url}/messages.php",
-                        data=del_data,
-                    )
+                resp = RequestUtils(
+                    headers=headers_post,
+                    cookies=self._cookie,
+                ).post_res(
+                    url=f"{self._site_url}/messages.php",
+                    data=del_data,
+                )
 
-                    total_deleted += len(delete_ids)
-                    logger.info(f"🧹 删除第 {page_num} 页 {len(delete_ids)} 封站内信")
-                else:
-                    # 当前页没有匹配的信件，停止
-                    break
-
+                status = resp.status_code if resp and hasattr(resp, "status_code") else "?"
+                logger.info(f"🧹 第 {page_num} 页删除 {len(delete_ids)} 封站内信（HTTP {status}）")
+                total_deleted += len(delete_ids)
                 time.sleep(1)  # 避免请求过快
 
         except Exception as e:
-            logger.error(f"清理站内信异常：{e}")
+            logger.error(f"清理站内信异常：{e}", exc_info=True)
 
         if total_deleted > 0:
             logger.info(f"🧹 共清理 {total_deleted} 封站内信")
+        else:
+            logger.info("🧹 未发现需要清理的站内信")
 
     def _parse_prize(self, prize_text: str) -> Tuple[str, str, int]:
         """

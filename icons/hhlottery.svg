@@ -1,1 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y="80" font-size="80">🎰</text></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <circle cx="50" cy="50" r="48" fill="#fff" stroke="#333" stroke-width="3"/>
+  <path d="M2,50 A48,48 0 0,1 98,50" fill="#DC2626"/>
+  <rect x="2" y="47" width="96" height="6" fill="#333"/>
+  <circle cx="50" cy="50" r="14" fill="#fff" stroke="#333" stroke-width="3"/>
+  <circle cx="50" cy="50" r="7" fill="#333"/>
+</svg>
