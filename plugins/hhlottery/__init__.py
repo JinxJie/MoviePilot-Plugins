@@ -437,8 +437,7 @@ class HHLottery(_PluginBase):
 
     def get_page(self) -> List[dict]:
         """
-        统计页面（Vuetify 组件，参考油猴脚本排版：区块化 + 大数字 + 明细竖向）
-        本轮统计 / 奖品统计（按轮次）/ 最近中奖（日志式）一排三列
+        统计页面（借鉴 playletlottery 插件 UI：信息卡 + 标签网格 + 明细竖向）
         """
         data = self._load_data()
         stats = data.get("stats", {})
@@ -449,6 +448,7 @@ class HHLottery(_PluginBase):
         total_count = stats.get("total_count", 0)
         total_cost = stats.get("total_cost", 0)
         total_wins = stats.get("total_wins", 0)
+        total_earned = stats.get("total_earned", 0)
         last_balance = stats.get("last_balance", 0)
 
         # 本轮统计
@@ -459,28 +459,57 @@ class HHLottery(_PluginBase):
         round_time = round_stats.get("time", "")[5:16]
         round_number = data.get("round_count", len(round_records))
 
-        # 盈亏显示（大数字 + 颜色）
-        if round_pnl >= 0:
-            pnl_number = f"+{round_pnl:,}"
-            pnl_class = "text-h5 font-weight-bold text-success"
-        else:
-            pnl_number = f"{round_pnl:,}"
-            pnl_class = "text-h5 font-weight-bold text-error"
+        # 盈亏文本与颜色
+        pnl_text = f"+{round_pnl:,}" if round_pnl >= 0 else f"{round_pnl:,}"
+        pnl_class = "text-h5 font-weight-bold text-success" if round_pnl >= 0 else "text-h5 font-weight-bold text-error"
 
-        # ── 奖品统计（按轮次，倒序，最多 50 轮）──
-        prize_round_lines = []
+        # ── 奖品统计（按轮次，每轮：标题行 + 奖品标签）──
+        round_blocks = []
         for idx in range(len(round_records) - 1, -1, -1):
             rec = round_records[idx]
             rn = rec.get("number", idx + 1)
             rt = rec.get("time", "")[5:16]
             prizes = rec.get("prizes", {})
-            if prizes:
-                items = ", ".join(f"{name}×{cnt}" for name, cnt in
-                                  sorted(prizes.items(), key=lambda x: -x[1]))
-            else:
-                items = "无中奖"
-            prize_round_lines.append(f"第 {rn} 轮 {rt}\n    {items}")
-        prize_round_text = "\n".join(prize_round_lines) if prize_round_lines else "暂无记录"
+            chips = []
+            for name, cnt in sorted(prizes.items(), key=lambda x: -x[1]):
+                chips.append({
+                    "component": "VChip",
+                    "props": {
+                        "variant": "tonal",
+                        "color": "primary",
+                        "size": "small",
+                        "class": "ma-1",
+                    },
+                    "text": f"{name} ×{cnt}",
+                })
+            if not chips:
+                chips = [{
+                    "component": "div",
+                    "props": {"class": "text-caption text-medium-emphasis"},
+                    "text": "无中奖",
+                }]
+            round_blocks.append({
+                "component": "div",
+                "props": {"class": "mb-2"},
+                "content": [
+                    {
+                        "component": "div",
+                        "props": {"class": "text-caption text-medium-emphasis mb-1"},
+                        "text": f"第 {rn} 轮 · {rt}",
+                    },
+                    {
+                        "component": "div",
+                        "props": {"class": "d-flex flex-wrap"},
+                        "content": chips,
+                    },
+                ],
+            })
+        if not round_blocks:
+            round_blocks = [{
+                "component": "div",
+                "props": {"class": "text-body-2 text-medium-emphasis"},
+                "text": "暂无记录，跑一轮后展示",
+            }]
 
         # ── 最近中奖（日志式，最多 50 条）──
         recent = history[-50:][::-1]
@@ -491,180 +520,110 @@ class HHLottery(_PluginBase):
             log_lines.append(f"[{ts}] {prize}")
         log_text = "\n".join(log_lines) if log_lines else "暂无记录"
 
-        page = [
-            # ── 顶部统计（一排 4 个，大数字）──
-            {
-                "component": "VRow",
+        # 信息列（标签 + 大数字）
+        def info_col(label: str, value: str, color: str = "primary") -> dict:
+            return {
+                "component": "VCol",
+                "props": {"cols": 6, "sm": 3},
                 "content": [
                     {
-                        "component": "VCol",
-                        "props": {"cols": 6, "sm": 3},
-                        "content": [
-                            {
-                                "component": "VCard",
-                                "props": {"variant": "tonal", "color": "primary"},
-                                "content": [
-                                    {
-                                        "component": "VCardText",
-                                        "props": {"class": "text-center text-h6 font-weight-bold"},
-                                        "text": f"{total_count:,}",
-                                    },
-                                    {
-                                        "component": "VCardText",
-                                        "props": {"class": "text-center text-caption"},
-                                        "text": "🎲 总抽奖次数",
-                                    },
-                                ],
-                            }
-                        ],
+                        "component": "div",
+                        "props": {"class": "text-caption text-medium-emphasis"},
+                        "text": label,
                     },
                     {
-                        "component": "VCol",
-                        "props": {"cols": 6, "sm": 3},
-                        "content": [
-                            {
-                                "component": "VCard",
-                                "props": {"variant": "tonal", "color": "warning"},
-                                "content": [
-                                    {
-                                        "component": "VCardText",
-                                        "props": {"class": "text-center text-h6 font-weight-bold"},
-                                        "text": f"{total_cost:,}",
-                                    },
-                                    {
-                                        "component": "VCardText",
-                                        "props": {"class": "text-center text-caption"},
-                                        "text": "💸 总消耗憨豆",
-                                    },
-                                ],
-                            }
-                        ],
+                        "component": "div",
+                        "props": {"class": f"text-h6 font-weight-bold text-{color}"},
+                        "text": value,
+                    },
+                ],
+            }
+
+        page = [
+            # ── 顶部信息卡：我的抽奖信息 ──
+            {
+                "component": "VCard",
+                "props": {"variant": "tonal", "class": "mb-4"},
+                "content": [
+                    {
+                        "component": "VCardTitle",
+                        "text": "🎰 我的抽奖信息",
                     },
                     {
-                        "component": "VCol",
-                        "props": {"cols": 6, "sm": 3},
+                        "component": "VCardText",
                         "content": [
                             {
-                                "component": "VCard",
-                                "props": {"variant": "tonal", "color": "success"},
+                                "component": "VRow",
                                 "content": [
-                                    {
-                                        "component": "VCardText",
-                                        "props": {"class": "text-center text-h6 font-weight-bold"},
-                                        "text": f"{total_wins:,}",
-                                    },
-                                    {
-                                        "component": "VCardText",
-                                        "props": {"class": "text-center text-caption"},
-                                        "text": "🏆 总中奖次数",
-                                    },
+                                    info_col("💰 当前余额", f"{last_balance:,}", "info"),
+                                    info_col("💸 总消耗", f"{total_cost:,}", "warning"),
+                                    info_col("🎲 总抽奖", f"{total_count:,}", "primary"),
+                                    info_col("🏆 总中奖", f"{total_wins:,}", "success"),
                                 ],
-                            }
-                        ],
-                    },
-                    {
-                        "component": "VCol",
-                        "props": {"cols": 6, "sm": 3},
-                        "content": [
-                            {
-                                "component": "VCard",
-                                "props": {"variant": "tonal", "color": "info"},
-                                "content": [
-                                    {
-                                        "component": "VCardText",
-                                        "props": {"class": "text-center text-h6 font-weight-bold"},
-                                        "text": f"{last_balance:,}",
-                                    },
-                                    {
-                                        "component": "VCardText",
-                                        "props": {"class": "text-center text-caption"},
-                                        "text": "💰 当前余额",
-                                    },
-                                ],
-                            }
+                            },
                         ],
                     },
                 ],
             },
-            # ── 本轮统计 / 奖品统计 / 最近中奖 一排三列 ──
+            # ── 本轮统计 ──
             {
-                "component": "VRow",
+                "component": "VCard",
+                "props": {"variant": "tonal", "class": "mb-4"},
                 "content": [
-                    # 本轮统计（盈亏突出）
                     {
-                        "component": "VCol",
-                        "props": {"cols": 12, "sm": 4},
+                        "component": "VCardTitle",
+                        "text": f"🔄 本轮统计 · 第 {round_number} 轮",
+                    },
+                    {
+                        "component": "VCardText",
                         "content": [
                             {
-                                "component": "VCard",
-                                "props": {"variant": "outlined"},
-                                "content": [
-                                    {
-                                        "component": "VCardTitle",
-                                        "text": "🔄 本轮统计",
-                                    },
-                                    {
-                                        "component": "VCardText",
-                                        "props": {"class": "text-caption"},
-                                        "text": f"第 {round_number} 轮 · {round_time}",
-                                    },
-                                    {
-                                        "component": "VCardText",
-                                        "props": {"class": pnl_class},
-                                        "text": pnl_number,
-                                    },
-                                    {
-                                        "component": "VCardText",
-                                        "props": {"class": "text-caption"},
-                                        "text": f"🎲 抽奖 {round_count:,} 次 · 🏆 中奖 {round_wins:,} 次",
-                                    },
-                                ],
-                            }
+                                "component": "div",
+                                "props": {"class": "text-caption text-medium-emphasis mb-1"},
+                                "text": f"时间：{round_time}",
+                            },
+                            {
+                                "component": "div",
+                                "props": {"class": pnl_class},
+                                "text": pnl_text,
+                            },
+                            {
+                                "component": "div",
+                                "props": {"class": "text-body-2 mt-1"},
+                                "text": f"🎲 抽奖 {round_count:,} 次 · 🏆 中奖 {round_wins:,} 次",
+                            },
                         ],
                     },
-                    # 奖品统计（按轮次）
+                ],
+            },
+            # ── 奖品统计（按轮次）──
+            {
+                "component": "VCard",
+                "props": {"variant": "outlined", "class": "mb-4"},
+                "content": [
                     {
-                        "component": "VCol",
-                        "props": {"cols": 12, "sm": 4},
-                        "content": [
-                            {
-                                "component": "VCard",
-                                "props": {"variant": "outlined"},
-                                "content": [
-                                    {
-                                        "component": "VCardTitle",
-                                        "text": "🎁 奖品统计",
-                                    },
-                                    {
-                                        "component": "VCardText",
-                                        "props": {"class": "text-body-2"},
-                                        "text": prize_round_text,
-                                    },
-                                ],
-                            }
-                        ],
+                        "component": "VCardTitle",
+                        "text": "🎁 奖品统计（最近 50 轮）",
                     },
-                    # 最近中奖（日志式）
                     {
-                        "component": "VCol",
-                        "props": {"cols": 12, "sm": 4},
-                        "content": [
-                            {
-                                "component": "VCard",
-                                "props": {"variant": "outlined"},
-                                "content": [
-                                    {
-                                        "component": "VCardTitle",
-                                        "text": "📜 最近中奖",
-                                    },
-                                    {
-                                        "component": "VCardText",
-                                        "props": {"class": "text-body-2"},
-                                        "text": log_text,
-                                    },
-                                ],
-                            }
-                        ],
+                        "component": "VCardText",
+                        "content": round_blocks,
+                    },
+                ],
+            },
+            # ── 最近中奖（日志式）──
+            {
+                "component": "VCard",
+                "props": {"variant": "outlined"},
+                "content": [
+                    {
+                        "component": "VCardTitle",
+                        "text": "📜 最近中奖",
+                    },
+                    {
+                        "component": "VCardText",
+                        "props": {"class": "text-body-2"},
+                        "text": log_text,
                     },
                 ],
             },
