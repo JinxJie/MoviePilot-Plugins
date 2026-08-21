@@ -113,8 +113,10 @@ class HHLottery(_PluginBase):
             self._max_count = int(config.get("max_count", 0))
             self._reserve_beans = int(config.get("reserve_beans", 0))
             self._notify = config.get("notify", True)
-            self._big_prize_keywords = config.get("big_prize_keywords", "VIP,邀请,500000")
+            self._big_prize_keywords = config.get("big_prize_keywords", "VIP,邀请,780000")
             self._clean_mail = config.get("clean_mail", True)
+            self._grand_stop = config.get("grand_stop", True)
+            self._gambler_mode = config.get("gambler_mode", False)
             self._onlyonce = config.get("onlyonce", False)
 
         # 如果设置了立即运行
@@ -132,6 +134,8 @@ class HHLottery(_PluginBase):
                 "notify": self._notify,
                 "big_prize_keywords": self._big_prize_keywords,
                 "clean_mail": self._clean_mail,
+                "grand_stop": self._grand_stop,
+                "gambler_mode": self._gambler_mode,
                 "onlyonce": False,
             })
             # 异步触发抽奖任务
@@ -325,55 +329,58 @@ class HHLottery(_PluginBase):
                             },
                         ],
                     },
-                    # ── 通知与清理 ──
+                    # ── 抽奖策略 ──
                     {
                         "component": "VRow",
                         "content": [
                             {
                                 "component": "VCol",
-                                "props": {"cols": 12, "sm": 4},
+                                "props": {"cols": 12},
                                 "content": [
                                     {
                                         "component": "VSwitch",
                                         "props": {
-                                            "model": "notify",
-                                            "label": "📢 推送通知",
+                                            "model": "grand_stop",
+                                            "label": "🏆 大奖止损",
                                             "color": "primary",
-                                        },
-                                    }
-                                ],
-                            },
-                            {
-                                "component": "VCol",
-                                "props": {"cols": 12, "sm": 4},
-                                "content": [
-                                    {
-                                        "component": "VSwitch",
-                                        "props": {
-                                            "model": "clean_mail",
-                                            "label": "🧹 自动清理站内信",
-                                            "color": "primary",
-                                        },
-                                    }
-                                ],
-                            },
-                            {
-                                "component": "VCol",
-                                "props": {"cols": 12, "sm": 4},
-                                "content": [
-                                    {
-                                        "component": "VSwitch",
-                                        "props": {
-                                            "model": "onlyonce",
-                                            "label": "▶️ 立即运行一次",
-                                            "color": "warning",
+                                            "hint": "总开关：命中目标大奖后停止抽奖",
+                                            "persistent-hint": True,
                                         },
                                     }
                                 ],
                             },
                         ],
                     },
-                    # ── 大奖关键词 ──
+                    {
+                        "component": "VRow",
+                        "content": [
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12},
+                                "content": [
+                                    {
+                                        "component": "VSwitch",
+                                        "props": {
+                                            "model": "gambler_mode",
+                                            "label": "🎲 赌徒模式",
+                                            "color": "warning",
+                                            "hint": "覆盖大奖止损：开启后命中大奖也继续抽",
+                                            "persistent-hint": True,
+                                        },
+                                    }
+                                ],
+                            },
+                        ],
+                    },
+                    {
+                        "component": "VRow",
+                        "content": [
+                            {"component": "VCol", "props": {"cols": 12, "sm": 3}, "content": [{"component": "VBtn", "props": {"block": True, "variant": "tonal"}, "content": ["⭐ VIP"]}]},
+                            {"component": "VCol", "props": {"cols": 12, "sm": 3}, "content": [{"component": "VBtn", "props": {"block": True, "variant": "tonal"}, "content": ["🎁 邀请"]}]},
+                            {"component": "VCol", "props": {"cols": 12, "sm": 3}, "content": [{"component": "VBtn", "props": {"block": True, "variant": "tonal"}, "content": ["💰 大额憨豆"]}]},
+                            {"component": "VCol", "props": {"cols": 12, "sm": 3}, "content": [{"component": "VBtn", "props": {"block": True, "variant": "tonal"}, "content": ["➕ 自定义"]}]},
+                        ],
+                    },
                     {
                         "component": "VRow",
                         "content": [
@@ -385,9 +392,9 @@ class HHLottery(_PluginBase):
                                         "component": "VTextField",
                                         "props": {
                                             "model": "big_prize_keywords",
-                                            "label": "🏆 大奖关键词",
+                                            "label": "🏆 目标大奖关键词",
                                             "placeholder": "VIP,邀请,780000",
-                                            "hint": "逗号分隔，命中立即通知并停止抽奖",
+                                            "hint": "逗号分隔；VIP / 邀请 / 大额憨豆 / 自定义关键词",
                                             "persistent-hint": True,
                                         },
                                     }
@@ -395,7 +402,7 @@ class HHLottery(_PluginBase):
                             },
                         ],
                     },
-                    # ── 脚本备注 ──
+
                     {
                         "component": "VRow",
                         "content": [
@@ -429,9 +436,11 @@ class HHLottery(_PluginBase):
             "max_count": 0,
             "reserve_beans": 0,
             "notify": True,
-            "big_prize_keywords": "VIP,邀请,780000",
             "clean_mail": True,
             "onlyonce": False,
+            "grand_stop": True,
+            "gambler_mode": False,
+            "big_prize_keywords": "VIP,邀请,780000",
         }
 
         return form, default_config
@@ -820,7 +829,15 @@ class HHLottery(_PluginBase):
                         f"🎲 本轮已抽：{draw_count} 次\n\n"
                         f"🎯 建议去买彩票，今天运势拉满！"
                     )
-                    break
+
+                    # 赌徒模式开启：中奖后继续抽，不止损
+                    if self._gambler_mode:
+                        logger.info("🎲 赌徒模式开启：命中大奖后继续抽奖")
+                        stop_reason = ""
+                        big_prize_hit = False
+                    elif self._grand_stop:
+                        break
+
 
                 # 定期校准余额
                 if draw_count % self.BALANCE_CHECK_INTERVAL == 0:
