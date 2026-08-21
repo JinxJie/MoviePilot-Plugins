@@ -1293,7 +1293,6 @@ class HHLottery(_PluginBase):
         pnl_text = f"🟢 本轮盈亏：+{pnl:,} 憨豆" if pnl >= 0 else f"🔴 本轮盈亏：{pnl:,} 憨豆"
 
         lines = ["🎰 HHCLUB 抽奖结束\n"]
-
         lines.append(f"🎲 完成次数：{round_stats['count']:,}")
         lines.append(f"💸 本轮消耗：{round_stats['cost']:,} 憨豆")
         lines.append(f"🫘 当前余额：{final_balance:,} 憨豆")
@@ -1302,53 +1301,59 @@ class HHLottery(_PluginBase):
         if stop_reason:
             lines.append(f"⏹️ {stop_reason}")
 
-        # 奖品统计
         prize_detail = round_stats.get("prize_detail", {})
         if prize_detail:
-            lines.append(f"\n🎁 奖品统计：")
-            for name, count in sorted(
-                prize_detail.items(), key=lambda x: -x[1]
-            ):
+            lines.append("\n🎁 奖品统计：")
+            for name, count in sorted(prize_detail.items(), key=lambda x: -x[1]):
                 lines.append(f"• {name} × {count}")
 
         return "\n".join(lines)
 
     def _build_overview_summary(self, round_stats: dict, final_balance: int) -> str:
         """
-        构建历史+今日汇总消息
+        构建历史+今日汇总消息（A 版：今日在前，历史在后）
         """
         data = self._load_data()
         stats = data.get("stats", {})
-        history = data.get("history", [])
         round_records = data.get("round_records", [])
 
         today = datetime.now().strftime("%Y-%m-%d")
-        today_records = [r for r in round_records if str(r.get('time') or '')[:10] == today]
-
-        total_count = stats.get('total_count', 0)
-        total_cost = stats.get('total_cost', 0)
-        total_wins = stats.get('total_wins', 0)
-        total_earned = stats.get('total_earned', 0)
+        today_records = [r for r in round_records if str(r.get("time") or "")[:10] == today]
 
         today_prizes = Counter()
         today_pnl = 0
         today_cost = 0
+        today_count = 0
         for r in today_records:
-            today_pnl += r.get('pnl', 0)
-            today_cost += r.get('cost', 0)
-            for name, cnt in (r.get('prizes') or {}).items():
+            today_pnl += r.get("pnl", 0)
+            today_cost += r.get("cost", 0)
+            today_count += r.get("count", 0)
+            for name, cnt in (r.get("prizes") or {}).items():
                 today_prizes[name] += cnt
 
         overall_prizes = Counter()
         for r in round_records:
-            for name, cnt in (r.get('prizes') or {}).items():
+            for name, cnt in (r.get("prizes") or {}).items():
                 overall_prizes[name] += cnt
 
+        total_count = stats.get("total_count", 0)
+        total_cost = stats.get("total_cost", 0)
+        total_wins = stats.get("total_wins", 0)
+
         lines = ["📊 HHCLUB 抽奖汇总\n"]
+        lines.append("📅 今日汇总")
         lines.append(f"🗓️ 今日轮次：{len(today_records):,}")
-        lines.append(f"🎲 今日抽奖：{sum(r.get('count', 0) for r in today_records):,}")
+        lines.append(f"🎲 今日抽奖：{today_count:,}")
         lines.append(f"💸 今日消耗：{today_cost:,} 憨豆")
         lines.append(f"🟢 今日盈亏：{today_pnl:+,} 憨豆")
+
+        if today_prizes:
+            lines.append("\n📅 今日奖品汇总：")
+            for name, cnt in sorted(today_prizes.items(), key=lambda x: -x[1]):
+                lines.append(f"• {name} × {cnt}")
+
+        lines.append("\n━━━━━━━━━━━━━━\n")
+        lines.append("📚 历史汇总")
         lines.append(f"🧾 历史轮次：{len(round_records):,}")
         lines.append(f"🎲 历史抽奖：{total_count:,}")
         lines.append(f"💰 历史消耗：{total_cost:,} 憨豆")
@@ -1356,16 +1361,12 @@ class HHLottery(_PluginBase):
         lines.append(f"🫘 当前余额：{final_balance:,} 憨豆")
 
         if overall_prizes:
-            lines.append("\n🎁 历史奖品汇总：")
+            lines.append("\n📚 历史奖品汇总：")
             for name, cnt in sorted(overall_prizes.items(), key=lambda x: -x[1]):
                 lines.append(f"• {name} × {cnt}")
 
-        if today_prizes:
-            lines.append("\n📅 今日奖品汇总：")
-            for name, cnt in sorted(today_prizes.items(), key=lambda x: -x[1]):
-                lines.append(f"• {name} × {cnt}")
-
         return "\n".join(lines)
+
 
 
     # ======================== API 处理 ========================
