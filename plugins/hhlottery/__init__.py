@@ -31,7 +31,7 @@ class HHLottery(_PluginBase):
 
     # 插件元信息
     plugin_name = "HHCLUB 自动抽奖"
-    plugin_desc = "HHCLUB 自动抽奖增强版 · 参考庆典版油猴脚本 UI · 大奖即时通知、站内信自动清理、Cron 定时运行 · 奖品名称汇总、今日/昨日分布 · 油猴脚本版：https://greasyfork.org/zh-CN/scripts/591722"
+    plugin_desc = "HHCLUB 自动抽奖增强版 · 大奖即时通知、站内信自动清理、Cron 定时运行 · 奖品名称汇总、今日/昨日分布 · 或者使用我的油猴脚本：HHCLUB 自动抽奖 · 庆典版 https://greasyfork.org/zh-CN/scripts/591722"
     plugin_icon = "hhlottery.png"
     plugin_version = "1.0.0"
     plugin_author = "JinxJie"

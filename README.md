@@ -6,7 +6,9 @@
 
 | 插件 | 版本 | 说明 |
 |------|------|------|
-| [HHCLUB 自动抽奖](plugins/hhlottery/) | v1.0.0 | HHCLUB 自动抽奖增强版，参考庆典版油猴脚本 UI，支持大奖即时通知、站内信自动清理、Cron 定时运行、奖品名称汇总、今日/昨日分布 |
+| [HHCLUB 自动抽奖](plugins/hhlottery/) | v1.0.0 | HHCLUB 自动抽奖增强版，支持大奖即时通知、站内信自动清理、Cron 定时运行、奖品名称汇总、今日/昨日分布
+
+或者使用我的油猴脚本：HHCLUB 自动抽奖 · 庆典版 https://greasyfork.org/zh-CN/scripts/591722 |
 
 ## 使用方法
 
@@ -20,7 +22,6 @@ https://raw.githubusercontent.com/JinxJie/MoviePilot-Plugins/master/package.json
 
 ### 功能
 - 🎰 自动抽奖（默认 8 秒间隔，自适应限流）
-- 🎨 参考庆典版油猴脚本 UI，新增奖品名称汇总、今日/昨日分布展示
 - 💰 余额追踪（每 20 抽服务端校准）
 - 🏆 大奖即时通知（VIP/邀请/大额憨豆/自定义关键词）
 - 📫 站内信自动清理（幸运大转盘通知）
