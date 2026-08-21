@@ -94,6 +94,7 @@ class HHLottery(_PluginBase):
     _reserve_beans: int = 0
     _notify: bool = True
     _big_prize_keywords: str = "VIP,邀请,780000"
+    _stats_migrated: bool = False
     _clean_mail: bool = True
     _onlyonce: bool = False
 
@@ -872,6 +873,21 @@ class HHLottery(_PluginBase):
             # 4. 保存统计数据
             self._save_round_stats(round_stats, balance)
 
+            # 4.1 对账日志
+            data = self._load_data()
+            stats = data.get("stats", {})
+            round_pnl = round_stats.get("earned", 0) - round_stats.get("cost", 0)
+            history_pnl = stats.get("total_earned", 0) - stats.get("total_cost", 0)
+            logger.info(
+                "🧾 对账结果："
+                f"本轮消耗={round_stats.get('cost', 0):,}，"
+                f"本轮收益={round_stats.get('earned', 0):,}，"
+                f"本轮盈亏={round_pnl:+,}；"
+                f"历史消耗={stats.get('total_cost', 0):,}，"
+                f"历史收益={stats.get('total_earned', 0):,}，"
+                f"历史盈亏={history_pnl:+,}"
+            )
+
             # 5. 发送汇总通知
             if self._notify:
                 summary = self._build_summary(round_stats, balance, stop_reason)
@@ -1227,6 +1243,25 @@ class HHLottery(_PluginBase):
         """
         return self._parse_number(text)
 
+    def _migrate_stats_once(self):
+        """
+        启动时对现有 round_records 做一次重算迁移，避免旧版本历史统计污染。
+        """
+        if self._stats_migrated:
+            return
+        try:
+            data = self._load_data()
+            if not data:
+                self._stats_migrated = True
+                return
+            data = self._rebuild_stats_from_round_records(data)
+            self._save_data(data)
+            self._stats_migrated = True
+            logger.info("🛠️ 历史统计重算迁移完成")
+        except Exception as e:
+            logger.error(f"历史统计重算迁移失败：{e}", exc_info=True)
+            self._stats_migrated = True
+
     # ======================== 数据管理 ========================
 
     def _load_data(self) -> dict:
@@ -1248,49 +1283,56 @@ class HHLottery(_PluginBase):
         except Exception as e:
             logger.error(f"保存数据异常：{e}")
 
+    def _rebuild_stats_from_round_records(self, data: dict) -> dict:
+        """
+        根据 round_records 重建总账，避免旧版本累计口径污染。
+        """
+        stats = data.get("stats", {})
+        round_records = data.get("round_records", [])
+
+        total_count = 0
+        total_cost = 0
+        total_wins = 0
+        total_earned = 0
+        prize_detail = {}
+        for r in round_records:
+            total_count += int(r.get("count", 0) or 0)
+            total_cost += int(r.get("cost", 0) or 0)
+            total_wins += int(r.get("wins", 0) or 0)
+            total_earned += int(r.get("earned", 0) or 0)
+            for name, cnt in (r.get("prizes") or {}).items():
+                prize_detail[name] = prize_detail.get(name, 0) + int(cnt or 0)
+
+        stats["total_count"] = total_count
+        stats["total_cost"] = total_cost
+        stats["total_wins"] = total_wins
+        stats["total_earned"] = total_earned
+        stats["prize_detail"] = prize_detail
+        stats["total_pnl"] = total_earned - total_cost
+        data["stats"] = stats
+        return data
+
     def _save_round_stats(self, round_stats: dict, final_balance: int):
         """
         保存本轮统计到累计数据
         """
         data = self._load_data()
-        stats = data.get("stats", {})
         history = data.get("history", [])
 
-        # 更新累计统计
-        stats["total_count"] = stats.get("total_count", 0) + round_stats["count"]
-        stats["total_cost"] = stats.get("total_cost", 0) + round_stats["cost"]
-        stats["total_wins"] = stats.get("total_wins", 0) + round_stats["wins"]
-        stats["total_earned"] = stats.get("total_earned", 0) + round_stats.get("earned", 0)
-        stats["last_balance"] = final_balance
-
-        # 合并奖品明细
-        prize_detail = stats.get("prize_detail", {})
-        for name, count in round_stats.get("prize_detail", {}).items():
-            prize_detail[name] = prize_detail.get(name, 0) + count
-        stats["prize_detail"] = prize_detail
-
-        # 更新本轮
+        # 保存轮次记录（最多 50 轮）
+        data["round_count"] = data.get("round_count", 0) + 1
+        round_number = data["round_count"]
+        round_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         pnl = round_stats.get("earned", 0) - round_stats["cost"]
-        stats["round"] = {
+        round_records = data.get("round_records", [])
+        round_records.append({
+            "number": round_number,
+            "time": round_time,
             "count": round_stats["count"],
             "cost": round_stats["cost"],
             "earned": round_stats.get("earned", 0),
             "pnl": pnl,
             "wins": round_stats["wins"],
-            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        }
-
-        # 保存轮次记录（最多 50 轮）
-        data["round_count"] = data.get("round_count", 0) + 1
-        round_number = data["round_count"]
-        round_records = data.get("round_records", [])
-        round_records.append({
-            "number": round_number,
-            "time": stats["round"]["time"],
-            "count": round_stats["count"],
-            "cost": round_stats["cost"],
-            "earned": round_stats.get("earned", 0),
-            "pnl": pnl,
             "prizes": round_stats.get("prize_detail", {}),
         })
         round_records = round_records[-50:]
@@ -1299,9 +1341,21 @@ class HHLottery(_PluginBase):
         # 合并历史（保留最近 200 条）
         history.extend(round_stats.get("history", []))
         history = history[-200:]
-
-        data["stats"] = stats
         data["history"] = history
+
+        # 统一按 round_records 重建总账，避免旧版本污染/重复累加
+        data = self._rebuild_stats_from_round_records(data)
+        stats = data.get("stats", {})
+        stats["last_balance"] = final_balance
+        stats["round"] = {
+            "count": round_stats["count"],
+            "cost": round_stats["cost"],
+            "earned": round_stats.get("earned", 0),
+            "pnl": pnl,
+            "wins": round_stats["wins"],
+            "time": round_time,
+        }
+        data["stats"] = stats
 
         self._save_data(data)
 
