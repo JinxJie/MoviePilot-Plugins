@@ -7,8 +7,9 @@
         "icon": "hhlottery.svg",
         "author": "JinxJie",
         "level": 2,
-        "v2": true,
+        "v3": false,
         "release": true,
+        "system_version": ">=2.14.6",
         "history": {
             "v1.0.0": "初始版本：自动抽奖、余额追踪、大奖通知、站内信清理、Cron 定时运行"
         }
