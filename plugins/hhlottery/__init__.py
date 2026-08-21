@@ -20,11 +20,7 @@ from app.log import logger
 from app.schemas.types import NotificationType
 from app.utils.http import RequestUtils
 
-try:
-    from app.plugins import _PluginBase
-except ImportError:
-    # MoviePilot V2 兼容
-    from app.plugins.plugin import _PluginBase
+from app.plugins import _PluginBase
 
 
 class HHLottery(_PluginBase):
