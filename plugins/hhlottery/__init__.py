@@ -329,7 +329,6 @@ class HHLottery(_PluginBase):
                             },
                         ],
                     },
-                    # ── 抽奖策略 ──
                     {
                         "component": "VRow",
                         "content": [
@@ -359,6 +358,27 @@ class HHLottery(_PluginBase):
                                 "props": {"cols": 12},
                                 "content": [
                                     {
+                                        "component": "VTextField",
+                                        "props": {
+                                            "model": "big_prize_keywords",
+                                            "label": "🏆 目标关键词",
+                                            "placeholder": "VIP,邀请,780000",
+                                            "hint": "逗号分割，如 VIP,邀请,780000",
+                                            "persistent-hint": True,
+                                        },
+                                    }
+                                ],
+                            },
+                        ],
+                    },
+                    {
+                        "component": "VRow",
+                        "content": [
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12},
+                                "content": [
+                                    {
                                         "component": "VSwitch",
                                         "props": {
                                             "model": "gambler_mode",
@@ -372,36 +392,7 @@ class HHLottery(_PluginBase):
                             },
                         ],
                     },
-                    {
-                        "component": "VRow",
-                        "content": [
-                            {"component": "VCol", "props": {"cols": 12, "sm": 3}, "content": [{"component": "VBtn", "props": {"block": True, "variant": "tonal"}, "content": ["⭐ VIP"]}]},
-                            {"component": "VCol", "props": {"cols": 12, "sm": 3}, "content": [{"component": "VBtn", "props": {"block": True, "variant": "tonal"}, "content": ["🎁 邀请"]}]},
-                            {"component": "VCol", "props": {"cols": 12, "sm": 3}, "content": [{"component": "VBtn", "props": {"block": True, "variant": "tonal"}, "content": ["💰 大额憨豆"]}]},
-                            {"component": "VCol", "props": {"cols": 12, "sm": 3}, "content": [{"component": "VBtn", "props": {"block": True, "variant": "tonal"}, "content": ["➕ 自定义"]}]},
-                        ],
-                    },
-                    {
-                        "component": "VRow",
-                        "content": [
-                            {
-                                "component": "VCol",
-                                "props": {"cols": 12},
-                                "content": [
-                                    {
-                                        "component": "VTextField",
-                                        "props": {
-                                            "model": "big_prize_keywords",
-                                            "label": "🏆 目标大奖关键词",
-                                            "placeholder": "VIP,邀请,780000",
-                                            "hint": "逗号分隔；VIP / 邀请 / 大额憨豆 / 自定义关键词",
-                                            "persistent-hint": True,
-                                        },
-                                    }
-                                ],
-                            },
-                        ],
-                    },
+
 
                     {
                         "component": "VRow",
