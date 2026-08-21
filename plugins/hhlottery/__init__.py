@@ -1095,11 +1095,7 @@ class HHLottery(_PluginBase):
         格式：{"stats": {...}, "history": [...]}
         """
         try:
-            if hasattr(self, "plugindata") and self.plugindata:
-                return self.plugindata
-            # 尝试从文件加载
-            data = self.get_data("hhlottery_data") or {}
-            return data
+            return self.get_data("hhlottery_data") or {}
         except Exception:
             return {}
 
@@ -1108,8 +1104,6 @@ class HHLottery(_PluginBase):
         保存数据到插件数据存储
         """
         try:
-            if hasattr(self, "plugindata"):
-                self.plugindata = data
             self.save_data("hhlottery_data", data)
         except Exception as e:
             logger.error(f"保存数据异常：{e}")
@@ -1173,11 +1167,7 @@ class HHLottery(_PluginBase):
         try:
             # MoviePilot V2/V3 通知方式
             if hasattr(self, "systemmessage") and self.systemmessage:
-                self.systemmessage.send_message(
-                    title="HHCLUB 自动抽奖",
-                    text=message,
-                    image="",
-                )
+                self.systemmessage.put(message, title="HHCLUB 自动抽奖")
             elif hasattr(self, "post_message"):
                 self.post_message(
                     channel="site",
