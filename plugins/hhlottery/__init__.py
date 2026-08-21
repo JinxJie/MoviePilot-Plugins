@@ -1198,31 +1198,17 @@ class HHLottery(_PluginBase):
 
     def _send_notification(self, message: str):
         """
-        通过 MoviePilot 通知系统发送消息
+        通过 MoviePilot 通知系统发送消息（Telegram/微信/飞书等）
         """
         if not self._notify:
             return
 
         try:
-            # MoviePilot V2/V3 通知方式
-            if hasattr(self, "systemmessage") and self.systemmessage:
-                self.systemmessage.put(message, title="HHCLUB 自动抽奖")
-            elif hasattr(self, "post_message"):
-                self.post_message(
-                    channel="site",
-                    title="HHCLUB 自动抽奖",
-                    text=message,
-                )
-            else:
-                # 通用方式：通过 event 发送
-                self.event_manager.send_event(
-                    EventType.PluginAction,
-                    {
-                        "type": "notification",
-                        "title": "HHCLUB 自动抽奖",
-                        "text": message,
-                    },
-                )
+            self.post_message(
+                mtype=NotificationType.Plugin,
+                title="HHCLUB 自动抽奖",
+                text=message,
+            )
         except Exception as e:
             logger.error(f"发送通知失败：{e}")
 
