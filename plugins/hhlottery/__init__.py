@@ -33,7 +33,7 @@ class HHLottery(_PluginBase):
     plugin_name = "HHCLUB 自动抽奖"
     plugin_desc = "HHCLUB 自动抽奖增强版 · 大奖即时通知、站内信自动清理、Cron 定时运行 · 奖品名称汇总、今日/昨日分布 · 或者使用我的油猴脚本：HHCLUB 自动抽奖 · 庆典版 https://greasyfork.org/zh-CN/scripts/591722"
     plugin_icon = "hhlottery.png"
-    plugin_version = "1.0.1"
+    plugin_version = "1.0.2"
     plugin_author = "JinxJie"
     author_url = "https://github.com/JinxJie"
     plugin_config_prefix = "hhlottery_"
@@ -662,6 +662,8 @@ class HHLottery(_PluginBase):
 
             logger.info(f"💰 当前余额：{balance:,} 憨豆，单次消耗：{cost_per_draw:,} 憨豆")
             round_stats["start_balance"] = balance
+            before_balance = balance
+            vip_converted_total = 0
 
             # 更新余额到统计
             self._update_stats_field("last_balance", balance)
@@ -767,8 +769,29 @@ class HHLottery(_PluginBase):
                     balance += prize_value
                     round_stats["earned"] += prize_value
                 elif prize_type == "vip":
-                    # VIP 折算为 1,000,000 憨豆计入盈亏
-                    round_stats["earned"] += 1000000
+                    # 先按脚本逻辑：校准余额，判断是否发生 VIP→憨豆 转换
+                    # 理论余额 = 抽奖前余额 - 单次消耗
+                    # 如果实际余额比理论余额多出约 100 万，则认定 VIP 已转换为憨豆
+                    real_balance, _ = self._fetch_balance()
+                    if real_balance is not None:
+                        theoretical_balance = before_balance - cost_per_draw
+                        extra_beans = real_balance - theoretical_balance
+                        if 900000 <= extra_beans <= 1100000:
+                            converted = int(round(extra_beans))
+                            balance = real_balance
+                            round_stats["earned"] += converted
+                            vip_converted_total += converted
+                            logger.info(f"🔄 VIP奖励已转换为憨豆 {converted:,}（余额校验确认）")
+                        else:
+                            balance = real_balance
+                            logger.info(f"ℹ️ VIP 未转换为憨豆，按 VIP 天数统计（额外差值 {extra_beans:,}）")
+                    else:
+                        # 余额取不到时，退回到文案判断；只有文本里带憨豆/1000000 才算转换
+                        if "憨豆" in prize_text or "1000000" in prize_text:
+                            converted = prize_value or 1000000
+                            round_stats["earned"] += converted
+                            vip_converted_total += converted
+                            logger.info(f"🔄 VIP奖励已转换为憨豆 {converted:,}（文案判断）")
                 round_stats["wins"] += 1
                 round_stats["prize_detail"][prize_name] = (
                     round_stats["prize_detail"].get(prize_name, 0) + 1
@@ -1208,6 +1231,7 @@ class HHLottery(_PluginBase):
         stats["total_count"] = stats.get("total_count", 0) + round_stats["count"]
         stats["total_cost"] = stats.get("total_cost", 0) + round_stats["cost"]
         stats["total_wins"] = stats.get("total_wins", 0) + round_stats["wins"]
+        stats["total_earned"] = stats.get("total_earned", 0) + round_stats.get("earned", 0)
         stats["last_balance"] = final_balance
 
         # 合并奖品明细
