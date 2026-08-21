@@ -438,6 +438,7 @@ class HHLottery(_PluginBase):
     def get_page(self) -> List[dict]:
         """
         统计页面（Vuetify 组件，适配移动端）
+        本轮统计 / 奖品统计 / 最近中奖 一排三列，明细竖向排列
         """
         data = self._load_data()
         stats = data.get("stats", {})
@@ -456,23 +457,23 @@ class HHLottery(_PluginBase):
         round_cost = round_stats.get("cost", 0)
         round_wins = round_stats.get("wins", 0)
 
-        # 奖品统计文本
+        # 奖品统计（竖向排列）
         prize_lines = []
         for name, count in sorted(prize_detail.items(), key=lambda x: -x[1]):
-            prize_lines.append(f"• {name} × {count}")
+            prize_lines.append(f"{name} × {count}")
         prize_text = "\n".join(prize_lines) if prize_lines else "暂无记录"
 
-        # 最近中奖（最新 20 条）
+        # 最近中奖（最新 20 条，竖向排列）
         recent = history[-20:][::-1]
         history_lines = []
         for item in recent:
-            ts = item.get("time", "")[-8:]  # 只取时间部分
+            ts = item.get("time", "")[-8:]
             prize = item.get("prize", "")
             history_lines.append(f"[{ts}] {prize}")
         history_text = "\n".join(history_lines) if history_lines else "暂无记录"
 
         page = [
-            # ── 顶部统计卡片 ──
+            # ── 顶部统计卡片（一排 4 个）──
             {
                 "component": "VRow",
                 "content": [
@@ -486,13 +487,13 @@ class HHLottery(_PluginBase):
                                 "content": [
                                     {
                                         "component": "VCardText",
-                                        "props": {"class": "text-center"},
-                                        "text": f"🎲 {total_count:,}",
+                                        "props": {"class": "text-center text-h6"},
+                                        "text": f"{total_count:,}",
                                     },
                                     {
                                         "component": "VCardText",
                                         "props": {"class": "text-center text-caption"},
-                                        "text": "总抽奖次数",
+                                        "text": "🎲 总抽奖次数",
                                     },
                                 ],
                             }
@@ -508,13 +509,13 @@ class HHLottery(_PluginBase):
                                 "content": [
                                     {
                                         "component": "VCardText",
-                                        "props": {"class": "text-center"},
-                                        "text": f"💸 {total_cost:,}",
+                                        "props": {"class": "text-center text-h6"},
+                                        "text": f"{total_cost:,}",
                                     },
                                     {
                                         "component": "VCardText",
                                         "props": {"class": "text-center text-caption"},
-                                        "text": "总消耗憨豆",
+                                        "text": "💸 总消耗憨豆",
                                     },
                                 ],
                             }
@@ -530,13 +531,13 @@ class HHLottery(_PluginBase):
                                 "content": [
                                     {
                                         "component": "VCardText",
-                                        "props": {"class": "text-center"},
-                                        "text": f"🏆 {total_wins:,}",
+                                        "props": {"class": "text-center text-h6"},
+                                        "text": f"{total_wins:,}",
                                     },
                                     {
                                         "component": "VCardText",
                                         "props": {"class": "text-center text-caption"},
-                                        "text": "总中奖次数",
+                                        "text": "🏆 总中奖次数",
                                     },
                                 ],
                             }
@@ -552,13 +553,13 @@ class HHLottery(_PluginBase):
                                 "content": [
                                     {
                                         "component": "VCardText",
-                                        "props": {"class": "text-center"},
-                                        "text": f"💰 {last_balance:,}",
+                                        "props": {"class": "text-center text-h6"},
+                                        "text": f"{last_balance:,}",
                                     },
                                     {
                                         "component": "VCardText",
                                         "props": {"class": "text-center text-caption"},
-                                        "text": "当前余额",
+                                        "text": "💰 当前余额",
                                     },
                                 ],
                             }
@@ -566,10 +567,11 @@ class HHLottery(_PluginBase):
                     },
                 ],
             },
-            # ── 本轮统计 + 奖品统计 ──
+            # ── 本轮统计 / 奖品统计 / 最近中奖 一排三列 ──
             {
                 "component": "VRow",
                 "content": [
+                    # 本轮统计
                     {
                         "component": "VCol",
                         "props": {"cols": 12, "sm": 4},
@@ -594,9 +596,10 @@ class HHLottery(_PluginBase):
                             }
                         ],
                     },
+                    # 奖品统计
                     {
                         "component": "VCol",
-                        "props": {"cols": 12, "sm": 8},
+                        "props": {"cols": 12, "sm": 4},
                         "content": [
                             {
                                 "component": "VCard",
@@ -614,15 +617,10 @@ class HHLottery(_PluginBase):
                             }
                         ],
                     },
-                ],
-            },
-            # ── 最近中奖记录 ──
-            {
-                "component": "VRow",
-                "content": [
+                    # 最近中奖记录
                     {
                         "component": "VCol",
-                        "props": {"cols": 12},
+                        "props": {"cols": 12, "sm": 4},
                         "content": [
                             {
                                 "component": "VCard",
@@ -630,7 +628,7 @@ class HHLottery(_PluginBase):
                                 "content": [
                                     {
                                         "component": "VCardTitle",
-                                        "text": "📜 最近中奖记录",
+                                        "text": "📜 最近中奖",
                                     },
                                     {
                                         "component": "VCardText",
