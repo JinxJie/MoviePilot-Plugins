@@ -1339,6 +1339,8 @@ class HHLottery(_PluginBase):
         total_count = stats.get("total_count", 0)
         total_cost = stats.get("total_cost", 0)
         total_wins = stats.get("total_wins", 0)
+        total_earned = stats.get("total_earned", 0)
+        total_pnl = total_earned - total_cost
 
         lines = ["📊 HHCLUB 抽奖汇总\n"]
         lines.append("📅 今日汇总")
@@ -1357,8 +1359,10 @@ class HHLottery(_PluginBase):
         lines.append(f"🧾 历史轮次：{len(round_records):,}")
         lines.append(f"🎲 历史抽奖：{total_count:,}")
         lines.append(f"💰 历史消耗：{total_cost:,} 憨豆")
+        lines.append(f"🟢 历史盈亏：{total_pnl:+,} 憨豆")
         lines.append(f"🏆 历史中奖：{total_wins:,}")
         lines.append(f"🫘 当前余额：{final_balance:,} 憨豆")
+
 
         if overall_prizes:
             lines.append("\n📚 历史奖品汇总：")
