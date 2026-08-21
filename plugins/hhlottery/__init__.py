@@ -1225,7 +1225,7 @@ class HHLottery(_PluginBase):
         """
         构建抽奖结束汇总消息
         """
-        lines = ["🎉 憨憨幸运大转盘完成\n"]
+        lines = ["🎰 HHCLUB 抽奖结束\n"]
 
         lines.append(f"🎲 完成次数：{round_stats['count']:,}")
         lines.append(f"💸 本轮消耗：{round_stats['cost']:,} 憨豆")
