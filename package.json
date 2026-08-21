@@ -1,7 +1,7 @@
 {
     "HHLottery": {
         "name": "HHCLUB 自动抽奖",
-        "description": "HHCLUB 自动抽奖增强版，支持大奖即时通知、站内信自动清理、Cron 定时运行",
+        "description": "HHCLUB 自动抽奖增强版，参考庆典版油猴脚本 UI，支持大奖即时通知、站内信自动清理、Cron 定时运行、奖品名称汇总、今日/昨日分布",
         "labels": "站点,自动化,抽奖",
         "version": "1.0.0",
         "icon": "hhlottery.png",
@@ -10,7 +10,7 @@
         "v2": true,
         "release": true,
         "history": {
-            "v1.0.0": "初始版本：自动抽奖、余额追踪、大奖通知、站内信清理、Cron 定时运行"
+            "v1.0.0": "初始版本：自动抽奖、余额追踪、大奖通知、站内信清理、Cron 定时运行；后续增强 UI 为奖品汇总、今日/昨日分布"
         }
     }
 }
