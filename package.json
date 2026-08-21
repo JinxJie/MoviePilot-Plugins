@@ -1,14 +1,15 @@
 {
-  "pluginPackage": [
-    {
-      "id": "hhlottery",
-      "pluginName": "HHCLUB 自动抽奖",
-      "description": "HHCLUB 自动抽奖增强版，支持大奖即时通知、站内信自动清理、Cron 定时运行",
-      "author": "JinxJie",
-      "github": "https://github.com/JinxJie/MoviePilot-Plugins",
-      "tags": ["站点", "自动化"],
-      "version": "1.0.0",
-      "level": 2
+    "hhlottery": {
+        "name": "HHCLUB 自动抽奖",
+        "description": "HHCLUB 自动抽奖增强版，支持大奖即时通知、站内信自动清理、Cron 定时运行",
+        "labels": "站点,自动化,抽奖",
+        "version": "1.0.0",
+        "icon": "https://raw.githubusercontent.com/JinxJie/MoviePilot-Plugins/main/icons/hhlottery.png",
+        "author": "JinxJie",
+        "level": 2,
+        "v2": true,
+        "history": {
+            "v1.0.0": "初始版本：自动抽奖、余额追踪、大奖通知、站内信清理、Cron 定时运行"
+        }
     }
-  ]
 }
