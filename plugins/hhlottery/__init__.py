@@ -31,7 +31,7 @@ class HHLottery(_PluginBase):
     # 插件元信息
     plugin_name = "HHCLUB 自动抽奖"
     plugin_desc = "HHCLUB 自动抽奖增强版 · 大奖即时通知、站内信自动清理、Cron 定时运行 · 油猴脚本版：https://greasyfork.org/zh-CN/scripts/591722"
-    plugin_icon = "hhlottery.svg"
+    plugin_icon = "hhlottery.png"
     plugin_version = "1.0.0"
     plugin_author = "JinxJie"
     author_url = "https://github.com/JinxJie"
@@ -177,6 +177,13 @@ class HHLottery(_PluginBase):
                 "description": "获取当前统计和历史记录",
                 "method": "GET",
                 "func": self._api_get_stats,
+            },
+            {
+                "path": "/hhlottery/test",
+                "summary": "测试通知",
+                "description": "发送一条测试通知",
+                "method": "GET",
+                "func": self._api_test_notify,
             },
         ]
 
@@ -393,8 +400,52 @@ class HHLottery(_PluginBase):
                             },
                         ],
                     },
-                ],
-            }
+                        ],
+                    },
+            # 测试通知按钮
+            {
+                "component": "VRow",
+                "content": [
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 12, "md": 6},
+                        "content": [
+                            {
+                                "component": "VBtn",
+                                "props": {
+                                    "block": True,
+                                    "color": "primary",
+                                    "variant": "tonal",
+                                },
+                                "text": "🧪 测试通知",
+                                "events": {
+                                    "click": {
+                                        "api": "plugin/HHLottery/hhlottery/test",
+                                        "method": "get",
+                                        "params": {
+                                            "apikey": settings.API_TOKEN
+                                        }
+                                    }
+                                }
+                            }
+                        ]
+                    },
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 12, "md": 6},
+                        "content": [
+                            {
+                                "component": "VAlert",
+                                "props": {
+                                    "type": "info",
+                                    "variant": "tonal",
+                                    "text": "💡 本插件移植自油猴脚本：https://greasyfork.org/zh-CN/scripts/591722"
+                                }
+                            }
+                        ]
+                    }
+                ]
+            },
         ]
 
         # 默认值
@@ -1264,6 +1315,20 @@ class HHLottery(_PluginBase):
             "success": True,
             "data": data,
         }
+
+    def _api_test_notify(self, *args, **kwargs) -> dict:
+        """
+        API: 测试通知
+        """
+        try:
+            self._send_notification(
+                "🧪 HHCLUB 抽奖插件通知测试\n\n"
+                "🎉 如果你看到这条消息，说明通知功能正常！\n"
+                "🎰 接下来坐等大奖降临吧～"
+            )
+            return {"success": True, "message": "测试通知已发送"}
+        except Exception as e:
+            return {"success": False, "message": f"发送失败：{e}"}
 
     def stop_service(self):
         """
