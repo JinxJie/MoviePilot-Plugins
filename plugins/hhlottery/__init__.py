@@ -438,39 +438,58 @@ class HHLottery(_PluginBase):
     def get_page(self) -> List[dict]:
         """
         统计页面（Vuetify 组件，适配移动端）
-        本轮统计 / 奖品统计 / 最近中奖 一排三列，明细竖向排列
+        本轮统计 / 奖品统计（按轮次）/ 最近中奖（日志式）
         """
         data = self._load_data()
         stats = data.get("stats", {})
         history = data.get("history", [])
+        round_records = data.get("round_records", [])
 
         # 累计统计
         total_count = stats.get("total_count", 0)
         total_cost = stats.get("total_cost", 0)
         total_wins = stats.get("total_wins", 0)
-        prize_detail = stats.get("prize_detail", {})
         last_balance = stats.get("last_balance", 0)
 
         # 本轮统计
         round_stats = stats.get("round", {})
         round_count = round_stats.get("count", 0)
-        round_cost = round_stats.get("cost", 0)
+        round_pnl = round_stats.get("pnl", 0)
         round_wins = round_stats.get("wins", 0)
+        round_time = round_stats.get("time", "")[5:16]  # MM-DD HH:MM
 
-        # 奖品统计（竖向排列）
-        prize_lines = []
-        for name, count in sorted(prize_detail.items(), key=lambda x: -x[1]):
-            prize_lines.append(f"{name} × {count}")
-        prize_text = "\n".join(prize_lines) if prize_lines else "暂无记录"
+        # 当前轮次编号
+        round_number = len(round_records)
 
-        # 最近中奖（最新 20 条，竖向排列）
-        recent = history[-20:][::-1]
-        history_lines = []
+        # 盈亏显示
+        if round_pnl >= 0:
+            pnl_text = f"🟢 +{round_pnl:,} 憨豆"
+        else:
+            pnl_text = f"🔴 {round_pnl:,} 憨豆"
+
+        # ── 奖品统计（按轮次，倒序，最多 50 轮）──
+        prize_round_lines = []
+        for idx in range(len(round_records) - 1, -1, -1):
+            rec = round_records[idx]
+            rn = rec.get("number", idx + 1)
+            rt = rec.get("time", "")[5:16]  # MM-DD HH:MM
+            prizes = rec.get("prizes", {})
+            if prizes:
+                items = ", ".join(f"{name}×{cnt}" for name, cnt in
+                                  sorted(prizes.items(), key=lambda x: -x[1]))
+            else:
+                items = "无中奖"
+            prize_round_lines.append(f"第 {rn} 轮 {rt}｜{items}")
+        prize_round_text = "\n".join(prize_round_lines) if prize_round_lines else "暂无记录"
+
+        # ── 最近中奖（日志式，最多 50 条）──
+        recent = history[-50:][::-1]
+        log_lines = []
         for item in recent:
-            ts = item.get("time", "")[-8:]
+            ts = item.get("time", "")[11:19]  # HH:MM:SS
             prize = item.get("prize", "")
-            history_lines.append(f"[{ts}] {prize}")
-        history_text = "\n".join(history_lines) if history_lines else "暂无记录"
+            log_lines.append(f"[{ts}] {prize}")
+        log_text = "\n".join(log_lines) if log_lines else "暂无记录"
 
         page = [
             # ── 顶部统计卡片（一排 4 个）──
@@ -487,7 +506,7 @@ class HHLottery(_PluginBase):
                                 "content": [
                                     {
                                         "component": "VCardText",
-                                        "props": {"class": "text-center text-h6"},
+                                        "props": {"class": "text-center text-h6 font-weight-bold"},
                                         "text": f"{total_count:,}",
                                     },
                                     {
@@ -509,7 +528,7 @@ class HHLottery(_PluginBase):
                                 "content": [
                                     {
                                         "component": "VCardText",
-                                        "props": {"class": "text-center text-h6"},
+                                        "props": {"class": "text-center text-h6 font-weight-bold"},
                                         "text": f"{total_cost:,}",
                                     },
                                     {
@@ -531,7 +550,7 @@ class HHLottery(_PluginBase):
                                 "content": [
                                     {
                                         "component": "VCardText",
-                                        "props": {"class": "text-center text-h6"},
+                                        "props": {"class": "text-center text-h6 font-weight-bold"},
                                         "text": f"{total_wins:,}",
                                     },
                                     {
@@ -553,7 +572,7 @@ class HHLottery(_PluginBase):
                                 "content": [
                                     {
                                         "component": "VCardText",
-                                        "props": {"class": "text-center text-h6"},
+                                        "props": {"class": "text-center text-h6 font-weight-bold"},
                                         "text": f"{last_balance:,}",
                                     },
                                     {
@@ -582,21 +601,22 @@ class HHLottery(_PluginBase):
                                 "content": [
                                     {
                                         "component": "VCardTitle",
-                                        "text": "🔄 本轮统计",
+                                        "text": f"🔄 本轮统计 · 第 {round_number} 轮",
                                     },
                                     {
                                         "component": "VCardText",
                                         "text": (
-                                            f"抽奖次数：{round_count:,}\n"
-                                            f"消耗憨豆：{round_cost:,}\n"
-                                            f"中奖次数：{round_wins:,}"
+                                            f"{pnl_text}\n"
+                                            f"🎲 抽奖次数：{round_count:,}\n"
+                                            f"🏆 中奖次数：{round_wins:,}\n"
+                                            f"🕐 时间：{round_time}"
                                         ),
                                     },
                                 ],
                             }
                         ],
                     },
-                    # 奖品统计
+                    # 奖品统计（按轮次）
                     {
                         "component": "VCol",
                         "props": {"cols": 12, "sm": 4},
@@ -607,17 +627,18 @@ class HHLottery(_PluginBase):
                                 "content": [
                                     {
                                         "component": "VCardTitle",
-                                        "text": "🎁 奖品统计",
+                                        "text": "🎁 奖品统计（按轮次）",
                                     },
                                     {
                                         "component": "VCardText",
-                                        "text": prize_text,
+                                        "props": {"class": "text-body-2"},
+                                        "text": prize_round_text,
                                     },
                                 ],
                             }
                         ],
                     },
-                    # 最近中奖记录
+                    # 最近中奖（日志式）
                     {
                         "component": "VCol",
                         "props": {"cols": 12, "sm": 4},
@@ -632,7 +653,8 @@ class HHLottery(_PluginBase):
                                     },
                                     {
                                         "component": "VCardText",
-                                        "text": history_text,
+                                        "props": {"class": "text-body-2"},
+                                        "text": log_text,
                                     },
                                 ],
                             }
@@ -679,6 +701,7 @@ class HHLottery(_PluginBase):
             "count": 0,
             "cost": 0,
             "wins": 0,
+            "earned": 0,
             "start_balance": 0,
             "prize_detail": {},
             "history": [],
@@ -814,6 +837,10 @@ class HHLottery(_PluginBase):
                 # 奖品统计（所有类型都记录）
                 if prize_type == "beans":
                     balance += prize_value
+                    round_stats["earned"] += prize_value
+                elif prize_type == "vip":
+                    # VIP 折算为 1,000,000 憨豆计入盈亏
+                    round_stats["earned"] += 1000000
                 round_stats["wins"] += 1
                 round_stats["prize_detail"][prize_name] = (
                     round_stats["prize_detail"].get(prize_name, 0) + 1
@@ -1260,16 +1287,35 @@ class HHLottery(_PluginBase):
         stats["prize_detail"] = prize_detail
 
         # 更新本轮
+        pnl = round_stats.get("earned", 0) - round_stats["cost"]
         stats["round"] = {
             "count": round_stats["count"],
             "cost": round_stats["cost"],
+            "earned": round_stats.get("earned", 0),
+            "pnl": pnl,
             "wins": round_stats["wins"],
             "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
 
-        # 合并历史（保留最近 100 条）
+        # 保存轮次记录（最多 50 轮）
+        data["round_count"] = data.get("round_count", 0) + 1
+        round_number = data["round_count"]
+        round_records = data.get("round_records", [])
+        round_records.append({
+            "number": round_number,
+            "time": stats["round"]["time"],
+            "count": round_stats["count"],
+            "cost": round_stats["cost"],
+            "earned": round_stats.get("earned", 0),
+            "pnl": pnl,
+            "prizes": round_stats.get("prize_detail", {}),
+        })
+        round_records = round_records[-50:]
+        data["round_records"] = round_records
+
+        # 合并历史（保留最近 200 条）
         history.extend(round_stats.get("history", []))
-        history = history[-100:]
+        history = history[-200:]
 
         data["stats"] = stats
         data["history"] = history
