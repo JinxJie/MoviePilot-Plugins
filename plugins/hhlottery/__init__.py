@@ -1347,7 +1347,9 @@ class HHLottery(_PluginBase):
         lines.append(f"🗓️ 今日轮次：{len(today_records):,}")
         lines.append(f"🎲 今日抽奖：{today_count:,}")
         lines.append(f"💸 今日消耗：{today_cost:,} 憨豆")
-        lines.append(f"🟢 今日盈亏：{today_pnl:+,} 憨豆")
+        today_pnl_icon = "🟢" if today_pnl >= 0 else "🔴"
+        lines.append(f"{today_pnl_icon} 今日盈亏：{today_pnl:+,} 憨豆")
+
 
         if today_prizes:
             lines.append("\n📅 今日奖品汇总：")
@@ -1359,7 +1361,9 @@ class HHLottery(_PluginBase):
         lines.append(f"🧾 历史轮次：{len(round_records):,}")
         lines.append(f"🎲 历史抽奖：{total_count:,}")
         lines.append(f"💰 历史消耗：{total_cost:,} 憨豆")
-        lines.append(f"🟢 历史盈亏：{total_pnl:+,} 憨豆")
+        history_pnl_icon = "🟢" if total_pnl >= 0 else "🔴"
+        lines.append(f"{history_pnl_icon} 历史盈亏：{total_pnl:+,} 憨豆")
+
         lines.append(f"🏆 历史中奖：{total_wins:,}")
         lines.append(f"🫘 当前余额：{final_balance:,} 憨豆")
 
