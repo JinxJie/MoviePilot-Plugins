@@ -927,16 +927,21 @@ class HHLottery(_PluginBase):
                 logger.warning("抽奖请求返回 None")
                 return None
 
-            if hasattr(res, "json"):
-                return res.json()
-            else:
-                # 兼容不同版本的 RequestUtils 返回值
+            text = res.text if hasattr(res, "text") else str(res)
+            if not text:
+                logger.warning("抽奖响应为空")
+                return None
+
+            stripped = text.lstrip()
+            if stripped.startswith("{") or stripped.startswith("["):
                 try:
-                    text = res.text if hasattr(res, "text") else str(res)
                     return json.loads(text)
-                except (json.JSONDecodeError, AttributeError):
-                    logger.warning(f"抽奖响应解析失败：{res}")
+                except json.JSONDecodeError as e:
+                    logger.warning(f"抽奖响应 JSON 解析失败：{e}，原始响应前 300 字：{text[:300]!r}")
                     return None
+
+            logger.warning(f"抽奖响应不是 JSON，前 300 字：{text[:300]!r}")
+            return None
 
         except Exception as e:
             logger.error(f"抽奖请求异常：{e}")
