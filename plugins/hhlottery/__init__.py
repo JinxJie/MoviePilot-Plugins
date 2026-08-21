@@ -392,8 +392,25 @@ class HHLottery(_PluginBase):
                             },
                         ],
                     },
-
-
+                    {
+                        "component": "VRow",
+                        "content": [
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12},
+                                "content": [
+                                    {
+                                        "component": "VSwitch",
+                                        "props": {
+                                            "model": "onlyonce",
+                                            "label": "▶️ 立即运行一次",
+                                            "color": "warning",
+                                        },
+                                    }
+                                ],
+                            },
+                        ],
+                    },
                     {
                         "component": "VRow",
                         "content": [
@@ -661,6 +678,7 @@ class HHLottery(_PluginBase):
                 return
 
             logger.info(f"💰 当前余额：{balance:,} 憨豆，单次消耗：{cost_per_draw:,} 憨豆")
+            logger.info(f"⚙️ 开关状态：大奖止损={self._grand_stop}，赌徒模式={self._gambler_mode}，目标关键词={self._big_prize_keywords}，保留憨豆={self._reserve_beans}")
             round_stats["start_balance"] = balance
             before_balance = balance
             vip_converted_total = 0
@@ -823,11 +841,14 @@ class HHLottery(_PluginBase):
 
                     # 赌徒模式开启：中奖后继续抽，不止损
                     if self._gambler_mode:
-                        logger.info("🎲 赌徒模式开启：命中大奖后继续抽奖")
+                        logger.info("🎲 逻辑结果：赌徒模式=开，大奖止损=无效，命中大奖后继续抽奖")
                         stop_reason = ""
                         big_prize_hit = False
                     elif self._grand_stop:
+                        logger.info("🏆 逻辑结果：赌徒模式=关，大奖止损=开，命中大奖后停止抽奖")
                         break
+                    else:
+                        logger.info("ℹ️ 逻辑结果：赌徒模式=关，大奖止损=关，命中大奖后继续抽奖")
 
 
                 # 定期校准余额
