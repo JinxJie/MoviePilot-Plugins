@@ -15,7 +15,7 @@
 在 MoviePilot **设置 → 插件 → 第三方插件源** 中添加本仓库地址：
 
 ```
-https://raw.githubusercontent.com/JinxJie/MoviePilot-Plugins/master/package.json
+https://raw.githubusercontent.com/JinxJie/MoviePilot-Plugins/main/package.json
 ```
 
 ## HHCLUB 自动抽奖
