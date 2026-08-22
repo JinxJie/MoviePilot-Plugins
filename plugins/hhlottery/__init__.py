@@ -535,6 +535,7 @@ class HHLottery(_PluginBase):
             "notify": True,
             "clean_mail": True,
             "onlyonce": False,
+            "stop_current": False,
             "grand_stop": True,
             "gambler_mode": False,
             "big_prize_keywords": "VIP,邀请,780000",
