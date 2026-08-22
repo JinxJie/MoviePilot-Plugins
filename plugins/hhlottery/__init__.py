@@ -817,7 +817,7 @@ class HHLottery(_PluginBase):
             if balance is None:
                 stop_reason = "无法获取余额，请检查 Cookie 是否有效"
                 logger.error(stop_reason)
-                self._send_notification(f"❌ HHCLUB 抽奖异常\n{stop_reason}")
+                self._send_notification(self._format_notification("❌ HHCLUB 抽奖异常", stop_reason))
                 self._running = False
                 return
 
@@ -981,13 +981,7 @@ class HHLottery(_PluginBase):
                     logger.info(f"🏆 {stop_reason}")
 
                     # 立即通知（喜庆风格）
-                    self._send_notification(
-                        f"🎊✨ 恭喜恭喜！天选之人！✨🎊\n\n"
-                        f"🏆 命中大奖：{prize_text}\n"
-                        f"💰 当前余额：{balance:,} 憨豆\n"
-                        f"🎲 本轮已抽：{draw_count} 次\n\n"
-                        f"🎯 建议去买彩票，今天运势拉满！"
-                    )
+                    self._send_notification(self._format_notification("🎊✨ 恭喜恭喜！天选之人！✨🎊", f"🏆 命中大奖：{prize_text}\n💰 当前余额：{balance:,} 憨豆\n🎲 本轮已抽：{draw_count} 次\n\n🎯 建议去买彩票，今天运势拉满！"))
 
                     # 赌徒模式开启：中奖后继续抽，不止损
                     if self._gambler_mode:
@@ -1050,13 +1044,13 @@ class HHLottery(_PluginBase):
             # 5. 发送汇总通知
             if self._notify:
                 summary = self._build_summary(round_stats, balance, stop_reason)
-                self._send_notification(summary)
+                self._send_notification(self._format_notification("🎰 HHCLUB 抽奖结束", summary))
                 overview = self._build_overview_summary(round_stats, balance)
-                self._send_notification(overview)
+                self._send_notification(self._format_notification("📊 HHCLUB 抽奖汇总", overview))
 
         except Exception as e:
             logger.error(f"HHCLUB 抽奖任务异常：{e}", exc_info=True)
-            self._send_notification(f"❌ HHCLUB 抽奖异常停止\n{e}")
+            self._send_notification(self._format_notification("❌ HHCLUB 抽奖异常停止", str(e)))
         finally:
             self._running = False
             logger.info("🎰 HHCLUB 自动抽奖任务结束")
@@ -1535,6 +1529,16 @@ class HHLottery(_PluginBase):
 
     # ======================== 通知 ========================
 
+    def _format_notification(self, title: str, body: str) -> str:
+        """
+        统一通知格式：时间戳 + 标题 + 正文
+        """
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        body = (body or "").strip()
+        if body:
+            return f"🕒 {ts}\n{title}\n\n{body}"
+        return f"🕒 {ts}\n{title}"
+
     def _send_notification(self, message: str):
         """
         通过 MoviePilot 通知系统发送消息（Telegram/微信/飞书等）
@@ -1563,7 +1567,7 @@ class HHLottery(_PluginBase):
         pnl = round_stats.get("earned", 0) - round_stats.get("cost", 0)
         pnl_text = f"🟢 本轮盈亏：+{pnl:,} 憨豆" if pnl >= 0 else f"🔴 本轮盈亏：{pnl:,} 憨豆"
 
-        lines = ["🎰 HHCLUB 抽奖结束\n"]
+        lines = [""]
         lines.append(f"🎲 完成次数：{round_stats['count']:,}")
         lines.append(f"💸 本轮消耗：{round_stats['cost']:,} 憨豆")
         lines.append(f"🫘 当前余额：{final_balance:,} 憨豆")
@@ -1578,7 +1582,7 @@ class HHLottery(_PluginBase):
             for name, count in sorted(prize_detail.items(), key=lambda x: -x[1]):
                 lines.append(f"• {name} × {count}")
 
-        return "\n".join(lines)
+        return "\n".join(lines).strip()
 
     def _build_overview_summary(self, round_stats: dict, final_balance: int) -> str:
         """
@@ -1613,7 +1617,7 @@ class HHLottery(_PluginBase):
         total_earned = stats.get("total_earned", 0)
         total_pnl = total_earned - total_cost
 
-        lines = ["📊 HHCLUB 抽奖汇总\n"]
+        lines = [""]
         lines.append("📅 今日汇总")
         lines.append(f"🗓️ 今日轮次：{len(today_records):,}")
         lines.append(f"🎲 今日抽奖：{today_count:,}")
@@ -1644,7 +1648,7 @@ class HHLottery(_PluginBase):
             for name, cnt in sorted(overall_prizes.items(), key=lambda x: -x[1]):
                 lines.append(f"• {name} × {cnt}")
 
-        return "\n".join(lines)
+        return "\n".join(lines).strip()
 
 
 
