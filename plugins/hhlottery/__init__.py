@@ -1499,7 +1499,7 @@ class HHLottery(_PluginBase):
             "wins": round_stats["wins"],
             "prizes": round_stats.get("prize_detail", {}),
         })
-        round_records = round_records[-50:]
+        round_records = round_records[-self._log_lines:]
         data["round_records"] = round_records
 
         # 合并历史（保留最近 200 条）
