@@ -56,3 +56,13 @@ https://github.com/JinxJie/MoviePilot-Plugins
 - 本仓库仅保留本人维护的插件，后续会持续按需补充新插件
 - 若你也在使用油猴脚本，可参考：
   [HHCLUB 自动抽奖 · 庆典版](https://greasyfork.org/zh-CN/scripts/591722)
+
+## 参考文档
+
+- MoviePilot 官方文档：<https://docs.movie-pilot.org>
+- 插件配置、加载与市场说明，以 MoviePilot 官方文档与插件市场设置为准
+
+## 致谢
+
+感谢 MoviePilot 官方项目、插件市场生态以及社区贡献者提供的框架与灵感。
+本仓库沿用官方 MoviePilot-Plugins 的目录结构与仓库组织方式，仅保留本人维护的插件。
