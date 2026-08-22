@@ -82,6 +82,8 @@ class HHLottery(_PluginBase):
     # 大额憨豆阈值
     BIG_BEANS_THRESHOLD = 780000
 
+    START_COOLDOWN_SECONDS = 3
+
     # ======================== 实例变量 ========================
 
     # 配置项
@@ -97,9 +99,14 @@ class HHLottery(_PluginBase):
     _stats_migrated: bool = False
     _clean_mail: bool = True
     _onlyonce: bool = False
+    _stop_current: bool = False
 
     # 运行状态
     _running: bool = False
+    _stop_requested: bool = False
+    _config_seq: int = 0
+    _active_seq: int = 0
+    _start_cooldown_until: float = 0.0
 
     def init_plugin(self, config: dict = None):
         """
@@ -120,13 +127,17 @@ class HHLottery(_PluginBase):
             self._grand_stop = config.get("grand_stop", True)
             self._gambler_mode = config.get("gambler_mode", False)
             self._onlyonce = config.get("onlyonce", False)
+            self._stop_current = config.get("stop_current", False)
             if self._gambler_mode:
                 self._max_count = 0
 
-        # 如果设置了立即运行
-        if self._onlyonce and self._cookie:
-            self._onlyonce = False
-            # 更新配置，重置 onlyonce
+            self._config_seq = int(config.get("config_seq") or (self._config_seq + 1))
+            logger.info(f"🧩 载入配置序号：{self._config_seq}，stop_current={self._stop_current}，onlyonce={self._onlyonce}")
+
+        # 如果设置了停止当前抽奖
+        if self._stop_current:
+            logger.info(f"🛑 stop_current 触发：准备停止当前抽奖（配置序号 {self._config_seq}）")
+            self._stop_current = False
             self.update_config({
                 "enabled": self._enabled,
                 "cron": self._cron,
@@ -142,10 +153,45 @@ class HHLottery(_PluginBase):
                 "grand_stop": self._grand_stop,
                 "gambler_mode": self._gambler_mode,
                 "onlyonce": False,
+                "stop_current": False,
+                "config_seq": self._config_seq,
             })
-            # 异步触发抽奖任务
-            import threading
-            threading.Thread(target=self._lottery_job, daemon=True).start()
+            self._api_stop_lottery()
+
+        # 如果设置了立即运行
+        if self._onlyonce and self._cookie:
+            self._onlyonce = False
+            # 更新配置，重置 onlyonce
+            logger.info(f"▶️ onlyonce 触发：准备按配置序号 {self._config_seq} 启动一次")
+            self.update_config({
+                "enabled": self._enabled,
+                "cron": self._cron,
+                "cookie": self._cookie,
+                "site_url": self._site_url,
+                "interval": self._interval,
+                "max_count": 0 if self._gambler_mode else self._max_count,
+                "reserve_beans": self._reserve_beans,
+                "log_lines": self._log_lines,
+                "notify": self._notify,
+                "big_prize_keywords": self._big_prize_keywords,
+                "clean_mail": self._clean_mail,
+                "grand_stop": self._grand_stop,
+                "gambler_mode": self._gambler_mode,
+                "onlyonce": False,
+                "stop_current": False,
+                "config_seq": self._config_seq,
+            })
+            if not self._running:
+                now = time.time()
+                if now < self._start_cooldown_until:
+                    logger.info(f"⏳ 立即运行请求被冷却拦截，剩余 {self._start_cooldown_until - now:.1f}s（onlyonce 分支）")
+                else:
+                    self._stop_requested = False
+                    self._active_seq = self._config_seq
+                    self._start_cooldown_until = now + self.START_COOLDOWN_SECONDS
+                    logger.info(f"▶️ 立即运行一次：配置序号 {self._config_seq}，冷却至 {self._start_cooldown_until:.1f}")
+                    import threading
+                    threading.Thread(target=self._lottery_job, daemon=True).start()
 
     def get_state(self) -> bool:
         """
@@ -429,6 +475,26 @@ class HHLottery(_PluginBase):
                                             "color": "warning",
                                         },
                                     }
+,
+                                    {
+                                        "component": "VSwitch",
+                                        "props": {
+                                            "model": "stop_current",
+                                            "label": "🛑 停止当前抽奖",
+                                            "color": "error",
+                                        },
+                                    },
+                                    {
+                                        "component": "VCol",
+                                        "props": {"cols": 12},
+                                        "content": [
+                                            {
+                                                "component": "div",
+                                                "children": "保存后会立即停止当前抽奖；这是一次性开关，触发后会自动清回关闭状态",
+                                                "props": {"style": "font-size:12px;color:#9a6a5a;margin-top:-4px;"},
+                                            }
+                                        ],
+                                    }
                                 ],
                             },
                         ],
@@ -661,8 +727,16 @@ class HHLottery(_PluginBase):
             logger.warning("HHCLUB 抽奖任务正在运行，跳过本次")
             return
 
+        now = time.time()
+        if now < self._start_cooldown_until:
+            logger.warning(f"⏳ 抽奖启动被冷却拦截，剩余 {self._start_cooldown_until - now:.1f}s")
+            return
+
         self._running = True
-        logger.info("🎰 HHCLUB 自动抽奖任务开始")
+        self._stop_requested = False
+        active_seq = self._active_seq = self._config_seq
+        logger.info(f"🎰 HHCLUB 自动抽奖任务开始（配置序号 {active_seq}）")
+        logger.info(f"🔐 当前活跃序号={self._active_seq}，最新配置序号={self._config_seq}")
 
         # 初始化本轮统计
         round_stats = {
@@ -715,6 +789,10 @@ class HHLottery(_PluginBase):
 
             # 2. 抽奖循环
             while True:
+                if self._stop_requested or self._active_seq != self._config_seq:
+                    stop_reason = f"检测到更新的配置，当前任务退出（活跃={self._active_seq}，最新={self._config_seq}，冷却剩余={max(0, self._start_cooldown_until - time.time()):.1f}s）"
+                    logger.info(f"♻️ {stop_reason}")
+                    break
                 # 检查停止条件：余额不足
                 if balance < cost_per_draw:
                     stop_reason = f"余额不足（余额 {balance:,}，需要 {cost_per_draw:,}）"
@@ -895,6 +973,10 @@ class HHLottery(_PluginBase):
                 self._clean_messages()
 
             # 3.1 抽奖结束后再校准一次最新余额
+            if self._active_seq != self._config_seq:
+                stop_reason = f"检测到更新的配置，停止保存旧任务结果（活跃={self._active_seq}，最新={self._config_seq}，冷却剩余={max(0, self._start_cooldown_until - time.time()):.1f}s）"
+                logger.info(f"♻️ {stop_reason}")
+                return
             final_balance, _ = self._fetch_balance()
             if final_balance is not None:
                 logger.info(f"💰 抽奖结束最新余额校准：{final_balance:,}（保存前原余额 {balance:,}）")
@@ -1525,15 +1607,36 @@ class HHLottery(_PluginBase):
         """
         API: 立即运行抽奖
         """
+        logger.info(f"▶️ API 立即运行请求：running={self._running}，配置序号={self._config_seq}，冷却剩余={max(0, self._start_cooldown_until - time.time()):.1f}s")
         if self._running:
             return {"success": False, "message": "抽奖任务正在运行中"}
 
         if not self._cookie:
             return {"success": False, "message": "未配置 Cookie"}
 
+        now = time.time()
+        if now < self._start_cooldown_until:
+            left = round(self._start_cooldown_until - now, 1)
+            return {"success": False, "message": f"启动冷却中，请 {left} 秒后再试"}
+        self._stop_requested = False
+        self._active_seq = self._config_seq
+        self._start_cooldown_until = now + self.START_COOLDOWN_SECONDS
+        logger.info(f"▶️ API 立即运行：配置序号 {self._config_seq}，冷却至 {self._start_cooldown_until:.1f}")
         import threading
         threading.Thread(target=self._lottery_job, daemon=True).start()
         return {"success": True, "message": "抽奖任务已启动"}
+
+    def _api_stop_lottery(self, *args, **kwargs) -> dict:
+        """
+        API: 手动停止抽奖
+        """
+        self._stop_requested = True
+        self._running = False
+        self._config_seq += 1
+        self._start_cooldown_until = time.time() + self.START_COOLDOWN_SECONDS
+        logger.info(f"🛑 服务停止，配置序号推进到 {self._config_seq}，冷却 {self.START_COOLDOWN_SECONDS} 秒")
+        logger.info(f"🛑 收到手动停止请求，配置序号推进到 {self._config_seq}")
+        return {"success": True, "message": "已请求停止抽奖"}
 
     def _api_get_stats(self, *args, **kwargs) -> dict:
         """
@@ -1549,4 +1652,8 @@ class HHLottery(_PluginBase):
         """
         停止插件服务
         """
-        pass
+        self._stop_requested = True
+        self._running = False
+        self._config_seq += 1
+        self._start_cooldown_until = time.time() + self.START_COOLDOWN_SECONDS
+        logger.info(f"🛑 服务停止，配置序号推进到 {self._config_seq}，冷却 {self.START_COOLDOWN_SECONDS} 秒")
