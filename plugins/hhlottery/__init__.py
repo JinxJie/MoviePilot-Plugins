@@ -113,6 +113,7 @@ class HHLottery(_PluginBase):
             self._interval = int(config.get("interval", self.DEFAULT_INTERVAL))
             self._max_count = int(config.get("max_count", 0))
             self._reserve_beans = int(config.get("reserve_beans", 0))
+            self._log_lines = max(1, int(config.get("log_lines", 200)))
             self._notify = config.get("notify", True)
             self._big_prize_keywords = config.get("big_prize_keywords", "VIP,邀请,780000")
             self._clean_mail = config.get("clean_mail", True)
@@ -134,6 +135,7 @@ class HHLottery(_PluginBase):
                 "interval": self._interval,
                 "max_count": 0 if self._gambler_mode else self._max_count,
                 "reserve_beans": self._reserve_beans,
+                "log_lines": self._log_lines,
                 "notify": self._notify,
                 "big_prize_keywords": self._big_prize_keywords,
                 "clean_mail": self._clean_mail,
@@ -330,6 +332,23 @@ class HHLottery(_PluginBase):
                                     }
                                 ],
                             },
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "sm": 4},
+                                "content": [
+                                    {
+                                        "component": "VTextField",
+                                        "props": {
+                                            "model": "log_lines",
+                                            "label": "📝 日志条数",
+                                            "placeholder": "200",
+                                            "type": "number",
+                                            "hint": "页面显示保留的日志条数",
+                                            "persistent-hint": True,
+                                        },
+                                    }
+                                ],
+                            },
                         ],
                     },
                     {
@@ -446,6 +465,7 @@ class HHLottery(_PluginBase):
             "interval": 8,
             "max_count": 0,
             "reserve_beans": 0,
+            "log_lines": 200,
             "notify": True,
             "clean_mail": True,
             "onlyonce": False,
@@ -580,7 +600,7 @@ class HHLottery(_PluginBase):
                     {"component": "VCardTitle", "text": "奖品名称汇总"},
                     {"component": "VCardText", "content": [
                         {"component": "div", "props": {"class": "text-caption text-medium-emphasis mb-2"}, "text": "全部轮次累计奖品标签"},
-                        {"component": "div", "props": {"class": "d-flex flex-wrap"}, "content": chip_grid(all_items)}
+                        {"component": "div", "props": {"class": "d-flex flex-wrap scroll-x"}, "content": chip_grid(all_items)}
                     ]},
                 ],
             },
@@ -588,24 +608,24 @@ class HHLottery(_PluginBase):
                 "component": "VRow",
                 "content": [
                     {"component": "VCol", "props": {"cols": 12, "md": 6}, "content": [
-                        {"component": "VCard", "props": {"variant": "tonal", "class": "h-100"}, "content": [
+                        {"component": "VCard", "props": {"variant": "tonal", "class": "h-100 overflow-x-auto"}, "content": [
                             {"component": "VCardTitle", "text": "今日汇总"},
                             {"component": "VCardText", "content": [
                                 summary_chart("今日奖品分布", today_items),
                                 {"component": "VDivider", "props": {"class": "my-3"}},
                                 {"component": "div", "props": {"class": "text-caption text-medium-emphasis mb-2"}, "text": "今日奖品名称"},
-                                {"component": "div", "props": {"class": "d-flex flex-wrap"}, "content": chip_grid(today_items)}
+                                {"component": "div", "props": {"class": "d-flex flex-wrap scroll-x"}, "content": chip_grid(today_items)}
                             ]},
                         ]}
                     ]},
                     {"component": "VCol", "props": {"cols": 12, "md": 6}, "content": [
-                        {"component": "VCard", "props": {"variant": "tonal", "class": "h-100"}, "content": [
+                        {"component": "VCard", "props": {"variant": "tonal", "class": "h-100 overflow-x-auto"}, "content": [
                             {"component": "VCardTitle", "text": "昨日汇总"},
                             {"component": "VCardText", "content": [
                                 summary_chart("昨日奖品分布", yesterday_items),
                                 {"component": "VDivider", "props": {"class": "my-3"}},
                                 {"component": "div", "props": {"class": "text-caption text-medium-emphasis mb-2"}, "text": "昨日奖品名称"},
-                                {"component": "div", "props": {"class": "d-flex flex-wrap"}, "content": chip_grid(yesterday_items)}
+                                {"component": "div", "props": {"class": "d-flex flex-wrap scroll-x"}, "content": chip_grid(yesterday_items)}
                             ]},
                         ]}
                     ]},
@@ -873,6 +893,12 @@ class HHLottery(_PluginBase):
             # 3. 最终清理站内信
             if self._clean_mail and draw_count > 0:
                 self._clean_messages()
+
+            # 3.1 结束前再刷新一次余额，避免最后一抽后余额未校准
+            final_balance, _ = self._fetch_balance()
+            if final_balance is not None:
+                balance = final_balance
+                logger.info(f"💰 结束前最终余额刷新：{balance:,}")
 
             # 4. 保存统计数据
             self._save_round_stats(round_stats, balance)
@@ -1349,7 +1375,7 @@ class HHLottery(_PluginBase):
 
         # 合并历史（保留最近 200 条）
         history.extend(round_stats.get("history", []))
-        history = history[-200:]
+        history = history[-self._log_lines:]
         data["history"] = history
 
         # 统一按 round_records 重建总账，避免旧版本污染/重复累加
