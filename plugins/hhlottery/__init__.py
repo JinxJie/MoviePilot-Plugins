@@ -1584,7 +1584,8 @@ class HHLottery(_PluginBase):
         pnl = round_stats.get("earned", 0) - round_stats.get("cost", 0)
         pnl_text = f"🟢 本轮盈亏：+{pnl:,} 憨豆" if pnl >= 0 else f"🔴 本轮盈亏：{pnl:,} 憨豆"
 
-        lines = [""]
+        lines = ["🎰 HHCLUB 抽奖结束"]
+        lines.append("")
         lines.append(f"🎲 完成次数：{round_stats['count']:,}")
         lines.append(f"💸 本轮消耗：{round_stats['cost']:,} 憨豆")
         lines.append(f"🫘 当前余额：{final_balance:,} 憨豆")
@@ -1595,7 +1596,8 @@ class HHLottery(_PluginBase):
 
         prize_detail = round_stats.get("prize_detail", {})
         if prize_detail:
-            lines.append("\n🎁 奖品统计：")
+            lines.append("")
+            lines.append("🎁 奖品统计：")
             for name, count in sorted(prize_detail.items(), key=lambda x: -x[1]):
                 lines.append(f"• {name} × {count}")
 
@@ -1612,9 +1614,21 @@ class HHLottery(_PluginBase):
         today = datetime.now().strftime("%Y-%m-%d")
         today_records = [r for r in round_records if str(r.get("time") or "")[:10] == today]
 
-        today_pnl = sum(r.get("pnl", 0) for r in today_records)
-        today_cost = sum(r.get("cost", 0) for r in today_records)
-        today_count = sum(r.get("count", 0) for r in today_records)
+        today_prizes = Counter()
+        today_pnl = 0
+        today_cost = 0
+        today_count = 0
+        for r in today_records:
+            today_pnl += r.get("pnl", 0)
+            today_cost += r.get("cost", 0)
+            today_count += r.get("count", 0)
+            for name, cnt in (r.get("prizes") or {}).items():
+                today_prizes[name] += cnt
+
+        overall_prizes = Counter()
+        for r in round_records:
+            for name, cnt in (r.get("prizes") or {}).items():
+                overall_prizes[name] += cnt
 
         total_count = stats.get("total_count", 0)
         total_cost = stats.get("total_cost", 0)
@@ -1622,7 +1636,8 @@ class HHLottery(_PluginBase):
         total_earned = stats.get("total_earned", 0)
         total_pnl = total_earned - total_cost
 
-        lines = [""]
+        lines = ["📊 HHCLUB 抽奖汇总"]
+        lines.append("")
         lines.append("📅 今日汇总")
         lines.append(f"🗓️ 今日轮次：{len(today_records):,}")
         lines.append(f"🎲 今日抽奖：{today_count:,}")
@@ -1630,32 +1645,31 @@ class HHLottery(_PluginBase):
         today_pnl_icon = "🟢" if today_pnl >= 0 else "🔴"
         lines.append(f"{today_pnl_icon} 今日盈亏：{today_pnl:+,} 憨豆")
 
-
         if today_prizes:
-            lines.append("\n📅 今日奖品汇总：")
+            lines.append("")
+            lines.append("📅 今日奖品汇总：")
             for name, cnt in sorted(today_prizes.items(), key=lambda x: -x[1]):
                 lines.append(f"• {name} × {cnt}")
 
-        lines.append("\n━━━━━━━━━━━━━━\n")
+        lines.append("")
+        lines.append("━━━━━━━━━━━━━━")
+        lines.append("")
         lines.append("📚 历史汇总")
         lines.append(f"🧾 历史轮次：{len(round_records):,}")
         lines.append(f"🎲 历史抽奖：{total_count:,}")
         lines.append(f"💰 历史消耗：{total_cost:,} 憨豆")
         history_pnl_icon = "🟢" if total_pnl >= 0 else "🔴"
         lines.append(f"{history_pnl_icon} 历史盈亏：{total_pnl:+,} 憨豆")
-
         lines.append(f"🏆 历史中奖：{total_wins:,}")
         lines.append(f"🫘 当前余额：{final_balance:,} 憨豆")
 
-
         if overall_prizes:
-            lines.append("\n📚 历史奖品汇总：")
+            lines.append("")
+            lines.append("📚 历史奖品汇总：")
             for name, cnt in sorted(overall_prizes.items(), key=lambda x: -x[1]):
                 lines.append(f"• {name} × {cnt}")
 
         return "\n".join(lines).strip()
-
-
 
     # ======================== API 处理 ========================
 
