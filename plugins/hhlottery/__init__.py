@@ -1612,21 +1612,9 @@ class HHLottery(_PluginBase):
         today = datetime.now().strftime("%Y-%m-%d")
         today_records = [r for r in round_records if str(r.get("time") or "")[:10] == today]
 
-        today_prizes = Counter()
-        today_pnl = 0
-        today_cost = 0
-        today_count = 0
-        for r in today_records:
-            today_pnl += r.get("pnl", 0)
-            today_cost += r.get("cost", 0)
-            today_count += r.get("count", 0)
-            for name, cnt in (r.get("prizes") or {}).items():
-                today_prizes[name] += cnt
-
-        overall_prizes = Counter()
-        for r in round_records:
-            for name, cnt in (r.get("prizes") or {}).items():
-                overall_prizes[name] += cnt
+        today_pnl = sum(r.get("pnl", 0) for r in today_records)
+        today_cost = sum(r.get("cost", 0) for r in today_records)
+        today_count = sum(r.get("count", 0) for r in today_records)
 
         total_count = stats.get("total_count", 0)
         total_cost = stats.get("total_cost", 0)
