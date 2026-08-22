@@ -6,7 +6,7 @@
 
 | 插件 | 版本 | 说明 |
 |------|------|------|
-| [HHCLUB 自动抽奖](plugins/hhlottery/) | v1.0.4 | HHCLUB 自动抽奖增强版，支持大奖即时通知、站内信自动清理、Cron 定时运行、奖品名称汇总、今日/昨日分布
+| [HHCLUB 自动抽奖](plugins/hhlottery/) | v1.0.5 | HHCLUB 自动抽奖增强版，支持大奖即时通知、站内信自动清理、Cron 定时运行、奖品名称汇总、今日/昨日分布
 
 或者使用我的油猴脚本：HHCLUB 自动抽奖 · 庆典版 https://greasyfork.org/zh-CN/scripts/591722 |
 

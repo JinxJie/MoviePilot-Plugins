@@ -33,7 +33,7 @@ class HHLottery(_PluginBase):
     plugin_name = "HHCLUB 自动抽奖"
     plugin_desc = "HHCLUB 自动抽奖增强版 · 大奖即时通知、站内信自动清理、Cron 定时运行 · 奖品名称汇总、今日/昨日分布 · 或者使用我的油猴脚本：HHCLUB 自动抽奖 · 庆典版 https://greasyfork.org/zh-CN/scripts/591722"
     plugin_icon = "hhlottery.png"
-    plugin_version = "1.0.4"
+    plugin_version = "1.0.5"
     plugin_author = "JinxJie"
     author_url = "https://github.com/JinxJie"
     plugin_config_prefix = "hhlottery_"
@@ -894,11 +894,11 @@ class HHLottery(_PluginBase):
             if self._clean_mail and draw_count > 0:
                 self._clean_messages()
 
-            # 3.1 结束前再刷新一次余额，避免最后一抽后余额未校准
+            # 3.1 抽奖结束后再校准一次最新余额
             final_balance, _ = self._fetch_balance()
             if final_balance is not None:
+                logger.info(f"💰 抽奖结束最新余额校准：{final_balance:,}（保存前原余额 {balance:,}）")
                 balance = final_balance
-                logger.info(f"💰 结束前最终余额刷新：{balance:,}")
 
             # 4. 保存统计数据
             self._save_round_stats(round_stats, balance)
