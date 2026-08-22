@@ -105,6 +105,7 @@ class HHLottery(_PluginBase):
     _stop_requested: bool = False
     _config_seq: int = 0
     _active_seq: int = 0
+    _consumed_once_seq: int = 0
 
     def init_plugin(self, config: dict = None):
         """
@@ -130,7 +131,8 @@ class HHLottery(_PluginBase):
                 self._max_count = 0
 
             self._config_seq = int(config.get("config_seq") or (self._config_seq + 1))
-            logger.info(f"🧩 载入配置序号：{self._config_seq}，stop_current={self._stop_current}，onlyonce={self._onlyonce}")
+            self._consumed_once_seq = int(config.get("consumed_once_seq") or self._consumed_once_seq)
+            logger.info(f"🧩 载入配置序号：{self._config_seq}，已消耗一次序号={self._consumed_once_seq}，stop_current={self._stop_current}，onlyonce={self._onlyonce}")
 
         # 如果设置了停止当前抽奖
         if self._stop_current:
@@ -153,14 +155,16 @@ class HHLottery(_PluginBase):
                 "onlyonce": False,
                 "stop_current": False,
                 "config_seq": self._config_seq,
+                "consumed_once_seq": self._consumed_once_seq,
             })
             self._api_stop_lottery()
 
         # 如果设置了立即运行
-        if self._onlyonce and self._cookie:
+        if self._onlyonce and self._cookie and self._consumed_once_seq != self._config_seq:
             self._onlyonce = False
+            self._consumed_once_seq = self._config_seq
             # 更新配置，重置 onlyonce
-            logger.info(f"▶️ onlyonce 触发：准备按配置序号 {self._config_seq} 启动一次")
+            logger.info(f"▶️ onlyonce 触发：准备按配置序号 {self._config_seq} 启动一次（已消耗）")
             self.update_config({
                 "enabled": self._enabled,
                 "cron": self._cron,
@@ -178,6 +182,7 @@ class HHLottery(_PluginBase):
                 "onlyonce": False,
                 "stop_current": False,
                 "config_seq": self._config_seq,
+                "consumed_once_seq": self._consumed_once_seq,
             })
             if not self._running:
                 self._stop_requested = False
@@ -529,6 +534,7 @@ class HHLottery(_PluginBase):
             "clean_mail": True,
             "onlyonce": False,
             "stop_current": False,
+            "consumed_once_seq": 0,
             "grand_stop": True,
             "gambler_mode": False,
             "big_prize_keywords": "VIP,邀请,780000",
@@ -1617,6 +1623,7 @@ class HHLottery(_PluginBase):
         self._stop_requested = True
         self._running = False
         self._config_seq += 1
+        self._consumed_once_seq = self._config_seq
         logger.info(f"🛑 服务停止，配置序号推进到 {self._config_seq}")
         logger.info(f"🛑 收到手动停止请求，配置序号推进到 {self._config_seq}")
         return {"success": True, "message": "已请求停止抽奖"}
@@ -1638,4 +1645,5 @@ class HHLottery(_PluginBase):
         self._stop_requested = True
         self._running = False
         self._config_seq += 1
+        self._consumed_once_seq = self._config_seq
         logger.info(f"🛑 服务停止，配置序号推进到 {self._config_seq}")
