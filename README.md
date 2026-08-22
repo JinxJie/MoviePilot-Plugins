@@ -6,7 +6,7 @@
 
 | 插件 | 目录 | 版本 | 说明 |
 |------|------|------|------|
-| [HHCLUB 自动抽奖](plugins/hhlottery/) | `plugins/hhlottery/` | v1.0.6 | HHCLUB 自动抽奖增强版，支持定时抽奖、手动停止、最新配置接管、大奖通知、汇总统计 |
+| [HHCLUB 自动抽奖](plugins/hhlottery/) | `plugins/hhlottery/` | v1.0.7 | HHCLUB 自动抽奖增强版，支持定时抽奖、手动停止、最新配置接管、大奖通知、汇总统计 |
 
 ## 使用方法
 
