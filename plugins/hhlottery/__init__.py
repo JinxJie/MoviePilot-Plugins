@@ -99,13 +99,14 @@ class HHLottery(_PluginBase):
     _clean_mail: bool = True
     _onlyonce: bool = False
     _stop_current: bool = False
+    _save_marker: str = ""
+    _seen_save_marker: str = ""
 
     # 运行状态
     _running: bool = False
     _stop_requested: bool = False
     _config_seq: int = 0
     _active_seq: int = 0
-    _consumed_once_seq: int = 0
 
     def init_plugin(self, config: dict = None):
         """
@@ -127,12 +128,15 @@ class HHLottery(_PluginBase):
             self._gambler_mode = config.get("gambler_mode", False)
             self._onlyonce = config.get("onlyonce", False)
             self._stop_current = config.get("stop_current", False)
+            self._save_marker = config.get("save_marker", "")
+            self._seen_save_marker = config.get("seen_save_marker", "")
             if self._gambler_mode:
                 self._max_count = 0
 
             self._config_seq = int(config.get("config_seq") or (self._config_seq + 1))
-            self._consumed_once_seq = int(config.get("consumed_once_seq") or self._consumed_once_seq)
-            logger.info(f"🧩 载入配置序号：{self._config_seq}，已消耗一次序号={self._consumed_once_seq}，stop_current={self._stop_current}，onlyonce={self._onlyonce}")
+            logger.info(f"🧩 载入配置序号：{self._config_seq}，save_marker={self._save_marker!r}，seen_save_marker={self._seen_save_marker!r}，stop_current={self._stop_current}，onlyonce={self._onlyonce}")
+            if self._save_marker:
+                logger.info(f"🪪 当前保存标记：{self._save_marker}，已消费标记：{self._seen_save_marker or '-'}")
 
         # 如果设置了停止当前抽奖
         if self._stop_current:
@@ -155,41 +159,48 @@ class HHLottery(_PluginBase):
                 "onlyonce": False,
                 "stop_current": False,
                 "config_seq": self._config_seq,
-                "consumed_once_seq": self._consumed_once_seq,
+                "save_marker": self._save_marker,
+                "seen_save_marker": self._seen_save_marker,
             })
             self._api_stop_lottery()
 
         # 如果设置了立即运行
-        if self._onlyonce and self._cookie and self._consumed_once_seq != self._config_seq:
-            self._onlyonce = False
-            self._consumed_once_seq = self._config_seq
-            # 更新配置，重置 onlyonce
-            logger.info(f"▶️ onlyonce 触发：准备按配置序号 {self._config_seq} 启动一次（已消耗）")
-            self.update_config({
-                "enabled": self._enabled,
-                "cron": self._cron,
-                "cookie": self._cookie,
-                "site_url": self._site_url,
-                "interval": self._interval,
-                "max_count": 0 if self._gambler_mode else self._max_count,
-                "reserve_beans": self._reserve_beans,
-                "log_lines": self._log_lines,
-                "notify": self._notify,
-                "big_prize_keywords": self._big_prize_keywords,
-                "clean_mail": self._clean_mail,
-                "grand_stop": self._grand_stop,
-                "gambler_mode": self._gambler_mode,
-                "onlyonce": False,
-                "stop_current": False,
-                "config_seq": self._config_seq,
-                "consumed_once_seq": self._consumed_once_seq,
-            })
-            if not self._running:
-                self._stop_requested = False
-                self._active_seq = self._config_seq
-                logger.info(f"▶️ 立即运行一次：配置序号 {self._config_seq}")
-                import threading
-                threading.Thread(target=self._lottery_job, daemon=True).start()
+        if self._onlyonce and self._cookie:
+            if not self._save_marker:
+                self._save_marker = f"{self._config_seq}-{int(__import__('time').time())}"
+            if self._seen_save_marker == self._save_marker:
+                logger.info(f"⏭️ onlyonce 已消费，跳过重复触发（save_marker={self._save_marker}）")
+            else:
+                logger.info(f"▶️ onlyonce 触发：准备按保存标记 {self._save_marker} 启动一次")
+                self._seen_save_marker = self._save_marker
+                logger.info(f"🪪 保存标记已消费：save_marker={self._save_marker} -> seen_save_marker={self._seen_save_marker}")
+                self._onlyonce = False
+                self.update_config({
+                    "enabled": self._enabled,
+                    "cron": self._cron,
+                    "cookie": self._cookie,
+                    "site_url": self._site_url,
+                    "interval": self._interval,
+                    "max_count": 0 if self._gambler_mode else self._max_count,
+                    "reserve_beans": self._reserve_beans,
+                    "log_lines": self._log_lines,
+                    "notify": self._notify,
+                    "big_prize_keywords": self._big_prize_keywords,
+                    "clean_mail": self._clean_mail,
+                    "grand_stop": self._grand_stop,
+                    "gambler_mode": self._gambler_mode,
+                    "onlyonce": False,
+                    "stop_current": False,
+                    "config_seq": self._config_seq,
+                    "save_marker": self._save_marker,
+                    "seen_save_marker": self._seen_save_marker,
+                })
+                if not self._running:
+                    self._stop_requested = False
+                    self._active_seq = self._config_seq
+                    logger.info(f"▶️ 立即运行一次：配置序号 {self._config_seq}，save_marker={self._save_marker}，seen={self._seen_save_marker}")
+                    import threading
+                    threading.Thread(target=self._lottery_job, daemon=True).start()
 
     def get_state(self) -> bool:
         """
@@ -534,7 +545,8 @@ class HHLottery(_PluginBase):
             "clean_mail": True,
             "onlyonce": False,
             "stop_current": False,
-            "consumed_once_seq": 0,
+            "save_marker": "",
+            "seen_save_marker": "",
             "grand_stop": True,
             "gambler_mode": False,
             "big_prize_keywords": "VIP,邀请,780000",
@@ -1602,7 +1614,7 @@ class HHLottery(_PluginBase):
         """
         API: 立即运行抽奖
         """
-        logger.info(f"▶️ API 立即运行请求：running={self._running}，配置序号={self._config_seq}")
+        logger.info(f"▶️ API 立即运行请求：running={self._running}，配置序号={self._config_seq}，save_marker={self._save_marker!r}")
         if self._running:
             return {"success": False, "message": "抽奖任务正在运行中"}
 
@@ -1611,7 +1623,7 @@ class HHLottery(_PluginBase):
 
         self._stop_requested = False
         self._active_seq = self._config_seq
-        logger.info(f"▶️ API 立即运行：配置序号 {self._config_seq}")
+        logger.info(f"▶️ API 立即运行：配置序号 {self._config_seq}，save_marker={self._save_marker!r}，seen={self._seen_save_marker!r}")
         import threading
         threading.Thread(target=self._lottery_job, daemon=True).start()
         return {"success": True, "message": "抽奖任务已启动"}
@@ -1623,9 +1635,8 @@ class HHLottery(_PluginBase):
         self._stop_requested = True
         self._running = False
         self._config_seq += 1
-        self._consumed_once_seq = self._config_seq
-        logger.info(f"🛑 服务停止，配置序号推进到 {self._config_seq}")
-        logger.info(f"🛑 收到手动停止请求，配置序号推进到 {self._config_seq}")
+        logger.info(f"🛑 服务停止，配置序号推进到 {self._config_seq}，save_marker={self._save_marker!r}，seen={self._seen_save_marker!r}")
+        logger.info(f"🛑 收到手动停止请求，配置序号推进到 {self._config_seq}，save_marker={self._save_marker!r}，seen={self._seen_save_marker!r}")
         return {"success": True, "message": "已请求停止抽奖"}
 
     def _api_get_stats(self, *args, **kwargs) -> dict:
@@ -1645,5 +1656,4 @@ class HHLottery(_PluginBase):
         self._stop_requested = True
         self._running = False
         self._config_seq += 1
-        self._consumed_once_seq = self._config_seq
-        logger.info(f"🛑 服务停止，配置序号推进到 {self._config_seq}")
+        logger.info(f"🛑 服务停止，配置序号推进到 {self._config_seq}，save_marker={self._save_marker!r}，seen={self._seen_save_marker!r}")
