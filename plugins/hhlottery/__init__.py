@@ -107,7 +107,9 @@ class HHLottery(_PluginBase):
     _stop_requested: bool = False
     _config_seq: int = 0
     _active_seq: int = 0
+    _save_id: str = ""
     _save_epoch: int = 0
+    _current_save_version: str = ""
 
     def init_plugin(self, config: dict = None):
         """
@@ -136,30 +138,29 @@ class HHLottery(_PluginBase):
 
             self._config_seq = int(config.get("config_seq") or (self._config_seq + 1))
             self._save_epoch = int(config.get("save_epoch") or self._save_epoch)
-            logger.info(f"🧩 载入配置序号：{self._config_seq}，save_epoch={self._save_epoch}，stop_current={self._stop_current}，onlyonce={self._onlyonce}")
+            self._save_id = config.get("save_id", "")
+            self._current_save_version = config.get("current_save_version", "")
+            logger.info(f"🧩 载入配置序号：{self._config_seq}，save_id={self._save_id!r}，current_save_version={self._current_save_version!r}，stop_current={self._stop_current}，onlyonce={self._onlyonce}")
             if self._save_marker:
                 logger.info(f"🪪 当前保存标记：{self._save_marker}，已消费标记：{self._seen_save_marker or '-'}")
 
         # 最新保存接管：任何一次新的保存都先让旧任务退出，再按最新配置决定是否启动
         if self._cookie:
-            # 每次配置载入都视作一次新的保存事件
+            # 生成本次保存版本
             self._save_epoch += 1
-            logger.info(f"🧭 保存事件到达：epoch={self._save_epoch}，当前运行={self._running}，onlyonce={self._onlyonce}，stop_current={self._stop_current}")
+            self._current_save_version = f"{self._config_seq}-{self._save_epoch}"
+            logger.info(f"🧭 保存事件到达：version={self._current_save_version}，当前运行={self._running}，onlyonce={self._onlyonce}，stop_current={self._stop_current}")
 
-            # 先请求当前任务停止，保证“最新保存覆盖旧任务”
+            # 如果当前有任务，先停掉旧任务
             if self._running:
-                logger.info(f"🛑 检测到新保存，先停止当前任务（epoch={self._save_epoch}）")
+                logger.info(f"🛑 新保存接管：先停止旧任务（version={self._current_save_version}）")
                 self._stop_requested = True
                 self._running = False
                 self._config_seq += 1
 
-            # 更新保存标记，避免旧保存态重复启动
-            self._save_marker = f"{self._config_seq}-{self._save_epoch}"
-            self._seen_save_marker = self._save_marker
-
-            # 若是停止开关，直接停，不启动
+            # 停止开关：只停不启
             if self._stop_current:
-                logger.info(f"🛑 stop_current 触发：停止当前抽奖并清除启动指令（epoch={self._save_epoch}）")
+                logger.info(f"🛑 stop_current 触发：停止当前抽奖并清除启动指令（version={self._current_save_version}）")
                 self._stop_current = False
                 self.update_config({
                     "enabled": self._enabled,
@@ -178,16 +179,15 @@ class HHLottery(_PluginBase):
                     "onlyonce": False,
                     "stop_current": False,
                     "config_seq": self._config_seq,
-                    "save_epoch": self._save_epoch,
-                    "save_marker": self._save_marker,
-                    "seen_save_marker": self._seen_save_marker,
+                    "save_id": self._save_id,
+                    "current_save_version": self._current_save_version,
                 })
                 self._api_stop_lottery()
                 return
 
-            # onlyonce：按最新保存执行一次（只认当前 epoch）
+            # onlyonce：只允许当前保存版本触发一次
             if self._onlyonce:
-                logger.info(f"▶️ 最新保存触发 onlyonce：epoch={self._save_epoch}，save_marker={self._save_marker}")
+                logger.info(f"▶️ 最新保存触发 onlyonce：version={self._current_save_version}")
                 self._onlyonce = False
                 self.update_config({
                     "enabled": self._enabled,
@@ -206,20 +206,19 @@ class HHLottery(_PluginBase):
                     "onlyonce": False,
                     "stop_current": False,
                     "config_seq": self._config_seq,
-                    "save_epoch": self._save_epoch,
-                    "save_marker": self._save_marker,
-                    "seen_save_marker": self._seen_save_marker,
+                    "save_id": self._save_id,
+                    "current_save_version": self._current_save_version,
                 })
                 if not self._running:
                     self._stop_requested = False
                     self._active_seq = self._config_seq
-                    logger.info(f"▶️ 立即运行一次：配置序号 {self._config_seq}，epoch={self._save_epoch}")
+                    logger.info(f"▶️ 立即运行一次：配置序号 {self._config_seq}，version={self._current_save_version}")
                     import threading
                     threading.Thread(target=self._lottery_job, daemon=True).start()
                 return
 
             # 普通保存：只更新，不自动起轮
-            logger.info(f"💾 普通保存完成，不自动启动（epoch={self._save_epoch}）")
+            logger.info(f"💾 普通保存完成，不自动启动（version={self._current_save_version}）")
             self.update_config({
                 "enabled": self._enabled,
                 "cron": self._cron,
@@ -237,9 +236,8 @@ class HHLottery(_PluginBase):
                 "onlyonce": False,
                 "stop_current": False,
                 "config_seq": self._config_seq,
-                "save_epoch": self._save_epoch,
-                "save_marker": self._save_marker,
-                "seen_save_marker": self._seen_save_marker,
+                "save_id": self._save_id,
+                "current_save_version": self._current_save_version,
             })
             return
 
@@ -587,8 +585,8 @@ class HHLottery(_PluginBase):
             "onlyonce": False,
             "stop_current": False,
             "save_epoch": 0,
-            "save_marker": "",
-            "seen_save_marker": "",
+            "save_id": "",
+            "current_save_version": "",
             "grand_stop": True,
             "gambler_mode": False,
             "big_prize_keywords": "VIP,邀请,780000",
@@ -1656,7 +1654,7 @@ class HHLottery(_PluginBase):
         """
         API: 立即运行抽奖
         """
-        logger.info(f"▶️ API 立即运行请求：running={self._running}，配置序号={self._config_seq}，save_epoch={self._save_epoch}")
+        logger.info(f"▶️ API 立即运行请求：running={self._running}，配置序号={self._config_seq}，version={self._current_save_version!r}")
         if self._running:
             return {"success": False, "message": "抽奖任务正在运行中"}
 
@@ -1665,7 +1663,7 @@ class HHLottery(_PluginBase):
 
         self._stop_requested = False
         self._active_seq = self._config_seq
-        logger.info(f"▶️ API 立即运行：配置序号 {self._config_seq}，save_epoch={self._save_epoch}")
+        logger.info(f"▶️ API 立即运行：配置序号 {self._config_seq}，version={self._current_save_version!r}")
         import threading
         threading.Thread(target=self._lottery_job, daemon=True).start()
         return {"success": True, "message": "抽奖任务已启动"}
@@ -1677,8 +1675,8 @@ class HHLottery(_PluginBase):
         self._stop_requested = True
         self._running = False
         self._config_seq += 1
-        logger.info(f"🛑 服务停止，配置序号推进到 {self._config_seq}，save_epoch={self._save_epoch}")
-        logger.info(f"🛑 收到手动停止请求，配置序号推进到 {self._config_seq}，save_epoch={self._save_epoch}")
+        logger.info(f"🛑 服务停止，配置序号推进到 {self._config_seq}，version={self._current_save_version!r}")
+        logger.info(f"🛑 收到手动停止请求，配置序号推进到 {self._config_seq}，version={self._current_save_version!r}")
         return {"success": True, "message": "已请求停止抽奖"}
 
     def _api_get_stats(self, *args, **kwargs) -> dict:
@@ -1698,4 +1696,4 @@ class HHLottery(_PluginBase):
         self._stop_requested = True
         self._running = False
         self._config_seq += 1
-        logger.info(f"🛑 服务停止，配置序号推进到 {self._config_seq}，save_epoch={self._save_epoch}")
+        logger.info(f"🛑 服务停止，配置序号推进到 {self._config_seq}，version={self._current_save_version!r}")
