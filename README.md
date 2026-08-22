@@ -59,7 +59,8 @@ https://github.com/JinxJie/MoviePilot-Plugins
 
 ## 参考文档
 
-- MoviePilot 官方文档：https://movie-pilot.org
+- MoviePilot 官方文档：https://wiki.movie-pilot.org
+- MoviePilot 官方站点：https://movie-pilot.org
 - 插件配置、加载与市场说明，以 MoviePilot 官方文档与插件市场设置为准
 
 ## 致谢
