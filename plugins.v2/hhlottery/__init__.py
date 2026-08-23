@@ -544,9 +544,11 @@ class HHLottery(_PluginBase):
             ]))
             content.append({"component": "VDivider", "props": {"class": "my-1"}})
 
-            # 饼图：具体奖项明细（名称：次数·累计·占比），图例在右侧
+            # 饼图 + 右侧具体奖项明细；移动端明细自动换到饼图下方
             pie_labels = []
             pie_series = []
+            pie_legend = []
+            pie_colors = ["#3B82F6", "#10B981", "#F59E0B", "#8B5CF6", "#EC4899", "#14B8A6", "#F97316", "#6366F1"]
             for g in groups:
                 for name, e in g["items"]:
                     cnt = int(e["count"])
@@ -554,22 +556,45 @@ class HHLottery(_PluginBase):
                         continue
                     total = int(e["total"])
                     ratio = cnt / total_wins * 100 if total_wins > 0 else 0.0
-                    pie_labels.append(f"{name}：{cnt}·{total}{g['unit']}·{ratio:.1f}%")
+                    pie_labels.append(name)
                     pie_series.append(cnt)
+                    color = pie_colors[(len(pie_legend)) % len(pie_colors)]
+                    pie_legend.append({
+                        "component": "div",
+                        "props": {"class": "text-caption text-no-wrap py-1"},
+                        "content": [
+                            {"component": "span", "props": {"style": f"color: {color}; font-size: 14px;"}, "text": "● "},
+                            {"component": "span", "text": f"{name}：{cnt}·{total}{g['unit']}·{ratio:.1f}%"},
+                        ],
+                    })
             content.append({
-                "component": "VApexChart",
-                "props": {
-                    "height": "260",
-                    "options": {
-                        "chart": {"type": "pie"},
-                        "labels": pie_labels,
-                        "subtitle": {"text": "名称：次数 · 累计 · 占比"},
-                        "legend": {"show": True, "position": "right"},
-                        "plotOptions": {"pie": {"expandOnClick": False}},
-                        "noData": {"text": "暂无数据"},
-                    },
-                    "series": pie_series,
-                },
+                "component": "VRow",
+                "props": {"dense": True, "class": "align-center"},
+                "content": [
+                    {"component": "VCol", "props": {"cols": 12, "md": 6}, "content": [{
+                        "component": "VApexChart",
+                        "props": {
+                            "height": "260",
+                            "options": {
+                                "chart": {"type": "pie"},
+                                "labels": pie_labels,
+                                "colors": pie_colors,
+                                "legend": {"show": False},
+                                "plotOptions": {"pie": {"expandOnClick": False}},
+                                "noData": {"text": "暂无数据"},
+                            },
+                            "series": pie_series,
+                        },
+                    }]},
+                    {"component": "VCol", "props": {"cols": 12, "md": 6}, "content": [{
+                        "component": "div",
+                        "props": {"class": "ps-md-2"},
+                        "content": [
+                            {"component": "div", "props": {"class": "text-caption text-medium-emphasis font-weight-bold pb-1"}, "text": "名称：次数 · 累计 · 占比"},
+                            *pie_legend,
+                        ],
+                    }]},
+                ],
             })
             content.append({"component": "VDivider", "props": {"class": "my-1"}})
 
@@ -619,14 +644,14 @@ class HHLottery(_PluginBase):
         today_groups, today_wins = build_prize_groups(today_records)
         history_groups, history_wins = build_prize_groups(round_records)
 
-        # 运行记录表格（最新在上，最多 10 次）；移动端只显示 时间/盈亏/余额
+        # 运行记录表格（最新在上，最多 10 次）；所有列保留，移动端可横向滑动
         run_columns = [
-            ("结束时间", "text-start ps-3", 6),          # (label, cell class, 移动端cols；0=移动端隐藏)
-            ("抽奖次数", "text-center d-none d-md-table-cell", 0),
-            ("消耗", "text-center d-none d-md-table-cell", 0),
-            ("获得", "text-center d-none d-md-table-cell", 0),
-            ("盈亏/盈亏率", "text-center", 3),
-            ("余额", "text-center", 3),
+            ("结束时间", "text-start ps-3 text-no-wrap"),
+            ("抽奖次数", "text-center text-no-wrap"),
+            ("消耗", "text-center text-no-wrap"),
+            ("获得", "text-center text-no-wrap"),
+            ("盈亏/盈亏率", "text-center text-no-wrap"),
+            ("余额", "text-center text-no-wrap"),
         ]
 
         def run_tr(cells: List[tuple], head: bool = False) -> dict:
@@ -640,9 +665,9 @@ class HHLottery(_PluginBase):
 
         run_table = {
             "component": "VTable",
-            "props": {"hover": True, "density": "compact"},
+            "props": {"hover": True, "density": "compact", "class": "run-records-table"},
             "content": [
-                {"component": "thead", "content": [run_tr([(h, cls) for h, cls, _ in run_columns], head=True)]},
+                {"component": "thead", "content": [run_tr(run_columns, head=True)]},
                 {"component": "tbody", "content": []},
             ],
         }
@@ -653,12 +678,12 @@ class HHLottery(_PluginBase):
             rr = pnl_rate(p, c)
             pc = pnl_color(p)
             run_table["content"][1]["content"].append(run_tr([
-                (str(r.get("time", "—")), "text-body-2 text-start ps-3"),
-                (f"{int(r.get('count', 0) or 0):,}", "text-body-2 text-center d-none d-md-table-cell"),
-                (f"{int(r.get('cost', 0) or 0):,}", "text-body-2 text-center d-none d-md-table-cell"),
-                (f"{int(r.get('earned', 0) or 0):,}", "text-body-2 text-center d-none d-md-table-cell"),
-                (f"{p:+,} / {rr:+.1f}%", f"text-body-2 font-weight-bold text-center text-{pc}"),
-                (f"{int(r.get('balance', 0) or 0):,}", "text-body-2 text-center"),
+                (str(r.get("time", "—")), "text-body-2 text-start ps-3 text-no-wrap"),
+                (f"{int(r.get('count', 0) or 0):,}", "text-body-2 text-center text-no-wrap"),
+                (f"{int(r.get('cost', 0) or 0):,}", "text-body-2 text-center text-no-wrap"),
+                (f"{int(r.get('earned', 0) or 0):,}", "text-body-2 text-center text-no-wrap"),
+                (f"{p:+,} / {rr:+.1f}%", f"text-body-2 font-weight-bold text-center text-no-wrap text-{pc}"),
+                (f"{int(r.get('balance', 0) or 0):,}", "text-body-2 text-center text-no-wrap"),
             ]))
 
         page = [
