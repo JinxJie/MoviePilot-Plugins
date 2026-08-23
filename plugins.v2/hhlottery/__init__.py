@@ -495,10 +495,10 @@ class HHLottery(_PluginBase):
         # 分组明细卡片（汇总头 + 次数/累计/占比）
         def prize_detail_card(title: str, groups: List[dict], total_wins: int, summary: dict) -> dict:
             def _col(text: str, cls: str, md: int) -> dict:
-                return {"component": "VCol", "props": {"cols": 12, "md": md, "class": cls}, "text": text}
+                return {"component": "VCol", "props": {"cols": 12, "md": md, "class": cls + " py-0"}, "text": text}
 
             def _row(cells: List[tuple]) -> dict:
-                return {"component": "VRow", "props": {"class": "pa-0 py-0"}, "content": [_col(t, c, m) for t, c, m in cells]}
+                return {"component": "VRow", "props": {"dense": True, "class": "py-0"}, "content": [_col(t, c, m) for t, c, m in cells]}
 
             content = []
 
@@ -568,9 +568,9 @@ class HHLottery(_PluginBase):
         def run_row(cells: List[tuple]) -> dict:
             return {
                 "component": "VRow",
-                "props": {"class": "pa-1"},
+                "props": {"dense": True, "class": "py-0"},
                 "content": [
-                    {"component": "VCol", "props": {"cols": 12, "md": md, "class": cls}, "text": text}
+                    {"component": "VCol", "props": {"cols": 12, "md": md, "class": cls + " py-0"}, "text": text}
                     for text, cls, md in cells
                 ],
             }
