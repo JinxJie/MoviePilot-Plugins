@@ -137,7 +137,7 @@ def build_form() -> Tuple[List[dict], Dict[str, Any]]:
 
                 # ── 说明 ──
                 card("mdi-information", "info", "说明", [
-                    row([col(12, alert("info", "💡 若你也在使用油猴脚本，可配合使用 HHCLUB 自动抽奖 · 庆典版 https://greasyfork.org/zh-CN/scripts/591722"))]),
+                    row([col(12, alert("info", "💡 若你也在使用油猴脚本，可使用 HHCLUB 自动抽奖 · 庆典版 https://greasyfork.org/zh-CN/scripts/591722"))]),
                 ]),
             ],
         }
