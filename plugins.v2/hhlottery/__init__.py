@@ -64,6 +64,30 @@ class HHLottery(_PluginBase):
             self._site_oper_cls = _load_site_oper()
         return self._site_oper_cls
 
+    def _resolve_cookie(self) -> Tuple[str, str]:
+        """
+        返回 (cookie, 来源说明)。cookie 为空时第二项就是错误原因。
+        """
+        domain = _short_domain(self._host)
+
+        if self._cookie_source == "site":
+            oper_cls = self._get_site_oper()
+            if not oper_cls:
+                return "", "当前 MoviePilot 版本里没找到站点管理模块，请改用手动填写"
+            try:
+                site = oper_cls().get_by_domain(domain)
+            except Exception as err:
+                return "", f"读取站点 Cookie 出错：{err}"
+            if not site or not getattr(site, "cookie", None):
+                return "", f"MoviePilot 站点管理里没有 {domain}，或该站点没有 Cookie"
+            return site.cookie, f"站点管理（{getattr(site, 'name', domain)}）"
+
+        # 手动填写
+        cookie = self._cookie.strip()
+        if not cookie:
+            return "", "没有填写 Cookie"
+        return cookie, "手动填写"
+
     # 请求 headers（抽奖用）
     DRAW_HEADERS = {
         "accept": "*/*",
@@ -103,8 +127,11 @@ class HHLottery(_PluginBase):
     # 配置项
     _enabled: bool = False
     _cron: str = "5 0 * * *"
+    _cookie_source: str = "manual"   # manual / site
+    _host: str = "hhanclub.net"
     _cookie: str = ""
     _site_url: str = "https://hhanclub.net"
+    _active_cookie: str = ""
     _interval: int = DEFAULT_INTERVAL
     _max_count: int = 0
     _reserve_beans: int = 0
@@ -133,6 +160,8 @@ class HHLottery(_PluginBase):
         if config:
             self._enabled = config.get("enabled", False)
             self._cron = config.get("cron", "5 0 * * *")
+            self._cookie_source = config.get("cookie_source", "manual")
+            self._host = config.get("host", "hhanclub.net")
             self._cookie = config.get("cookie", "")
             self._site_url = config.get("site_url", "https://hhanclub.net").rstrip("/")
             self._interval = int(config.get("interval") or self.DEFAULT_INTERVAL)
@@ -160,7 +189,7 @@ class HHLottery(_PluginBase):
                 logger.info(f"🪪 当前保存标记：{self._save_marker}，已消费标记：{self._seen_save_marker or '-'}")
 
         # 最新保存接管：任何一次新的保存都先让旧任务退出，再按最新配置决定是否启动
-        if self._cookie:
+        if self._cookie or self._cookie_source == "site":
             # 生成本次保存版本
             self._save_epoch += 1
             self._current_save_version = f"{self._config_seq}-{self._save_epoch}"
@@ -260,7 +289,7 @@ class HHLottery(_PluginBase):
         """
         获取插件启用状态
         """
-        return self._enabled and bool(self._cookie)
+        return self._enabled and (self._cookie_source == "site" or bool(self._cookie))
 
     def get_command(self) -> List[Dict[str, Any]]:
         """
@@ -452,7 +481,7 @@ class HHLottery(_PluginBase):
         """
         注册定时服务
         """
-        if self._enabled and self._cookie:
+        if self._enabled and (self._cookie_source == "site" or self._cookie):
             return [
                 {
                     "id": "hhlottery",
@@ -481,6 +510,16 @@ class HHLottery(_PluginBase):
         active_seq = self._active_seq = self._config_seq
         logger.info(f"🎰 HHCLUB 自动抽奖任务开始（配置序号 {active_seq}）")
         logger.info(f"🔐 当前活跃序号={self._active_seq}，最新配置序号={self._config_seq}")
+
+        # 解析 Cookie（手动填写 / 站点管理）
+        self._active_cookie, cookie_note = self._resolve_cookie()
+        if not self._active_cookie:
+            stop_reason = f"❌ 取不到 Cookie：{cookie_note}"
+            logger.error(stop_reason)
+            self._send_notification(self._format_notification("HHCLUB 抽奖异常", stop_reason))
+            self._running = False
+            return
+        logger.info(f"🔑 Cookie 来源：{cookie_note}")
 
         # 初始化本轮统计
         round_stats = {
@@ -790,7 +829,7 @@ class HHLottery(_PluginBase):
         try:
             req = RequestUtils(
                 headers=headers,
-                cookies=self._cookie,
+                cookies=self._active_cookie,
             )
             res = req.post_res(url=url, data="")
 
@@ -834,7 +873,7 @@ class HHLottery(_PluginBase):
         try:
             req = RequestUtils(
                 headers=headers,
-                cookies=self._cookie,
+                cookies=self._active_cookie,
             )
             res = req.get_res(url=url)
 
@@ -903,7 +942,7 @@ class HHLottery(_PluginBase):
 
                 req = RequestUtils(
                     headers=headers,
-                    cookies=self._cookie,
+                    cookies=self._active_cookie,
                 )
                 res = req.get_res(url=url)
 
@@ -988,7 +1027,7 @@ class HHLottery(_PluginBase):
 
                 resp = RequestUtils(
                     headers=headers_post,
-                    cookies=self._cookie,
+                    cookies=self._active_cookie,
                 ).post_res(
                     url=f"{self._site_url}/messages.php",
                     data=del_data,
@@ -1390,8 +1429,8 @@ class HHLottery(_PluginBase):
         if self._running:
             return {"success": False, "message": "抽奖任务正在运行中"}
 
-        if not self._cookie:
-            return {"success": False, "message": "未配置 Cookie"}
+        if not self._cookie and self._cookie_source != "site":
+            return {"success": False, "message": "未配置 Cookie（且未选择站点管理）"}
 
         self._stop_requested = False
         self._active_seq = self._config_seq
