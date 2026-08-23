@@ -1332,8 +1332,7 @@ class HHLottery(_PluginBase):
         pnl = round_stats.get("earned", 0) - round_stats.get("cost", 0)
         pnl_text = f"🟢 本轮盈亏：+{pnl:,} 憨豆" if pnl >= 0 else f"🔴 本轮盈亏：{pnl:,} 憨豆"
 
-        lines = ["🎰 HHCLUB 抽奖结束"]
-        lines.append("")
+        lines = []
         lines.append(f"🎲 完成次数：{round_stats['count']:,}")
         lines.append(f"💸 本轮消耗：{round_stats['cost']:,} 憨豆")
         lines.append(f"🫘 当前余额：{final_balance:,} 憨豆")
@@ -1384,8 +1383,7 @@ class HHLottery(_PluginBase):
         total_earned = stats.get("total_earned", 0)
         total_pnl = total_earned - total_cost
 
-        lines = ["📊 HHCLUB 抽奖汇总"]
-        lines.append("")
+        lines = []
         lines.append("📅 今日汇总")
         lines.append(f"🗓️ 今日轮次：{len(today_records):,}")
         lines.append(f"🎲 今日抽奖：{today_count:,}")
