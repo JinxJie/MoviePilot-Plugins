@@ -32,7 +32,7 @@ class HHLottery(_PluginBase):
 
     # 插件元信息
     plugin_name = "HHCLUB 自动抽奖"
-    plugin_desc = "HHCLUB 自动抽奖增强版 · 大奖即时通知、站内信自动清理、Cron 定时运行 · 今日/历史汇总、大奖摘要与命中详情 · 或者使用我的油猴脚本：HHCLUB 自动抽奖 · 庆典版 https://greasyfork.org/zh-CN/scripts/591722"
+    plugin_desc = "HHCLUB 自动抽奖增强版 · 大奖即时通知、站内信自动清理、Cron 定时运行 · 盈亏统计、奖品总览与命中明细（含占比饼图） · 或者使用我的油猴脚本：HHCLUB 自动抽奖 · 庆典版 https://greasyfork.org/zh-CN/scripts/591722"
     plugin_icon = "hhlottery.png"
     plugin_version = "1.0.7"
     plugin_author = "JinxJie"
@@ -332,11 +332,11 @@ class HHLottery(_PluginBase):
     def get_page(self) -> List[dict]:
         """
         统计页面：
-        - 我的抽奖信息（含盈亏率、最近运行）
-        - 大奖摘要
-        - 今日抽奖命中明细
-        - 历史抽奖命中明细
-        - 运行记录
+        - 我的抽奖信息（KPI 卡：憨豆/抽奖数/盈亏/最近运行）
+        - 奖品总览（6 项 KPI 卡）
+        - 今日抽奖命中明细（汇总头 + 占比饼图 + 明细表）
+        - 历史抽奖命中明细（汇总头 + 占比饼图 + 明细表）
+        - 运行记录（VTable）
         """
         data = self._load_data()
         stats = data.get("stats", {})
@@ -390,22 +390,29 @@ class HHLottery(_PluginBase):
         last_time = str(last_record.get("time") or "—") if last_record else "—"
         last_stop_reason = str(last_record.get("stop_reason") or "") if last_record else ""
 
-        # 指标块：label 左 + 值右（带颜色），下方小字说明；big=True 放大数字
-        def metric_block(label: str, value: str, value_color: str = "", note: str = "", note_color: str = "", big: bool = False) -> dict:
-            size = "text-h5" if big else "text-body-1"
-            value_cls = f"{size} font-weight-bold text-{value_color}" if value_color else f"{size} font-weight-bold"
-            rows = [{
-                "component": "div",
-                "props": {"class": "d-flex justify-space-between align-center py-0"},
-                "content": [
-                    {"component": "span", "props": {"class": "text-body-1 text-medium-emphasis"}, "text": label},
+        # KPI 卡：图标头像 + 标签 + 大数值（借鉴站点数据统计插件）
+        def kpi_card(icon: str, label: str, value: str, value_color: str = "", note: str = "") -> dict:
+            value_cls = f"text-h6 font-weight-bold text-{value_color}" if value_color else "text-h6 font-weight-bold"
+            right = [
+                {"component": "span", "props": {"class": "text-caption text-medium-emphasis"}, "text": label},
+                {"component": "div", "props": {"class": "d-flex align-center flex-wrap"}, "content": [
                     {"component": "span", "props": {"class": value_cls}, "text": value},
-                ],
-            }]
+                ]},
+            ]
             if note:
-                note_cls = f"text-caption pl-8 text-{note_color}" if note_color else "text-caption text-medium-emphasis pl-8"
-                rows.append({"component": "div", "props": {"class": note_cls}, "text": note})
-            return {"component": "div", "content": rows}
+                right.append({"component": "div", "props": {"class": "text-caption text-medium-emphasis"}, "text": note})
+            return {
+                "component": "VCard",
+                "props": {"variant": "tonal"},
+                "content": [
+                    {"component": "VCardText", "props": {"class": "d-flex align-center"}, "content": [
+                        {"component": "VAvatar", "props": {"rounded": True, "variant": "tonal", "color": "primary", "size": "x-large", "class": "me-3"}, "content": [
+                            {"component": "span", "props": {"class": "text-h6"}, "text": icon},
+                        ]},
+                        {"component": "div", "content": right},
+                    ]},
+                ],
+            }
 
         # 奖品总览卡（6 项 2×3 网格）
         def prize_overview_card(title: str, metrics: dict, groups: List[dict]) -> dict:
@@ -425,18 +432,12 @@ class HHLottery(_PluginBase):
             ]
 
             def _cell(icon: str, label: str, value: str, unit: str) -> dict:
-                return {
-                    "component": "VCol",
-                    "props": {"cols": 4, "class": "text-center py-2"},
-                    "content": [
-                        {"component": "div", "props": {"class": "text-body-2 text-medium-emphasis"}, "text": f"{icon} {label}"},
-                        {"component": "div", "props": {"class": "text-h6 font-weight-bold mt-1"}, "text": f"{value} {unit}"},
-                    ],
-                }
+                return kpi_card(icon, label, f"{value} {unit}")
 
             rows = [
-                {"component": "VRow", "props": {"dense": True}, "content": [_cell(*it) for it in items[:3]]},
-                {"component": "VRow", "props": {"dense": True}, "content": [_cell(*it) for it in items[3:]]},
+                {"component": "VRow", "props": {"dense": True}, "content": [
+                    {"component": "VCol", "props": {"cols": 6}, "content": [_cell(*it)]} for it in items
+                ]},
             ]
 
             return {
@@ -538,13 +539,36 @@ class HHLottery(_PluginBase):
             ]))
             content.append({"component": "VDivider", "props": {"class": "my-1"}})
 
-            # 奖项表头（移动端奖项加宽）
-            content.append(_row([
-                ("奖项", "text-caption font-weight-bold text-medium-emphasis", 4, 5),
-                ("次数", "text-caption font-weight-bold text-medium-emphasis text-right", 2),
-                ("累计", "text-caption font-weight-bold text-medium-emphasis text-right", 3),
-                ("占比", "text-caption font-weight-bold text-medium-emphasis text-right", 3, 2),
-            ]))
+            # 饼图：各组中奖次数占比
+            pie_labels = []
+            pie_series = []
+            for g in groups:
+                items = g["items"]
+                if not items:
+                    continue
+                cnt = sum(int(e["count"]) for _, e in items)
+                if cnt > 0:
+                    pie_labels.append(f"{g['icon']} {g['label']}")
+                    pie_series.append(cnt)
+            content.append({
+                "component": "VApexChart",
+                "props": {
+                    "height": "220",
+                    "options": {
+                        "chart": {"type": "pie"},
+                        "labels": pie_labels,
+                        "title": {"text": f"🎁 奖品分布 · 共 {total_wins:,} 次"},
+                        "legend": {"show": True, "position": "bottom"},
+                        "plotOptions": {"pie": {"expandOnClick": False}},
+                        "noData": {"text": "暂无数据"},
+                    },
+                    "series": pie_series,
+                },
+            })
+            content.append({"component": "VDivider", "props": {"class": "my-1"}})
+
+            # 奖项表格（VTable，hover 高亮）
+            tbody = []
             for g in groups:
                 items = g["items"]
                 if not items:
@@ -552,20 +576,41 @@ class HHLottery(_PluginBase):
                 g_count = sum(int(e["count"]) for _, e in items)
                 g_total = sum(int(e["total"]) for _, e in items)
                 g_ratio = g_count / total_wins * 100 if total_wins > 0 else 0.0
-                content.append(_row([
-                    (f"{g['icon']} {g['label']}", "text-body-2 font-weight-bold", 4, 5),
-                    (f"{g_count:,}", "text-body-2 font-weight-bold text-right", 2),
-                    (f"{g_total:,}{g['unit']}", "text-body-2 font-weight-bold text-right", 3),
-                    (f"{g_ratio:.1f}%", "text-body-2 font-weight-bold text-right", 3, 2),
-                ]))
+                tbody.append({
+                    "component": "tr",
+                    "content": [
+                        {"component": "td", "props": {"class": "text-body-2 font-weight-bold text-start ps-3"}, "text": f"{g['icon']} {g['label']}"},
+                        {"component": "td", "props": {"class": "text-body-2 font-weight-bold text-right"}, "text": f"{g_count:,}"},
+                        {"component": "td", "props": {"class": "text-body-2 font-weight-bold text-right"}, "text": f"{g_total:,}{g['unit']}"},
+                        {"component": "td", "props": {"class": "text-body-2 font-weight-bold text-right"}, "text": f"{g_ratio:.1f}%"},
+                    ],
+                })
                 for name, e in items:
                     ratio = e["count"] / total_wins * 100 if total_wins > 0 else 0.0
-                    content.append(_row([
-                        (f"　　{name}", "text-body-2 text-medium-emphasis", 4, 5),
-                        (f"{e['count']:,}", "text-body-2 text-right", 2),
-                        (f"{e['total']:,}{g['unit']}", "text-body-2 text-right", 3),
-                        (f"{ratio:.1f}%", "text-body-2 text-right", 3, 2),
-                    ]))
+                    tbody.append({
+                        "component": "tr",
+                        "content": [
+                            {"component": "td", "props": {"class": "text-body-2 text-medium-emphasis text-start ps-3"}, "text": f"　　{name}"},
+                            {"component": "td", "props": {"class": "text-body-2 text-right"}, "text": f"{e['count']:,}"},
+                            {"component": "td", "props": {"class": "text-body-2 text-right"}, "text": f"{e['total']:,}{g['unit']}"},
+                            {"component": "td", "props": {"class": "text-body-2 text-right"}, "text": f"{ratio:.1f}%"},
+                        ],
+                    })
+            content.append({
+                "component": "VTable",
+                "props": {"hover": True, "density": "compact"},
+                "content": [
+                    {"component": "thead", "content": [
+                        {"component": "tr", "content": [
+                            {"component": "th", "props": {"class": "text-start ps-3"}, "text": "奖项"},
+                            {"component": "th", "props": {"class": "text-right"}, "text": "次数"},
+                            {"component": "th", "props": {"class": "text-right"}, "text": "累计"},
+                            {"component": "th", "props": {"class": "text-right"}, "text": "占比"},
+                        ]},
+                    ]},
+                    {"component": "tbody", "content": tbody},
+                ],
+            })
 
             return {
                 "component": "VCard",
@@ -581,46 +626,44 @@ class HHLottery(_PluginBase):
 
         # 运行记录表格（最新在上，最多 10 次）；移动端只显示 时间/盈亏/余额
         run_columns = [
-            ("结束时间", 3, 6),    # (label, md列宽, 移动端cols；cols=0 表示移动端隐藏)
-            ("抽奖次数", 1, 0),
-            ("消耗", 2, 0),
-            ("获得", 2, 0),
-            ("盈亏/盈亏率", 2, 3),
-            ("余额", 2, 3),
+            ("结束时间", "text-start ps-3", 6),          # (label, cell class, 移动端cols；0=移动端隐藏)
+            ("抽奖次数", "text-center d-none d-md-table-cell", 0),
+            ("消耗", "text-center d-none d-md-table-cell", 0),
+            ("获得", "text-center d-none d-md-table-cell", 0),
+            ("盈亏/盈亏率", "text-center", 3),
+            ("余额", "text-center", 3),
         ]
 
-        def run_row(cells: List[tuple]) -> dict:
-            content = []
-            for text, cls, md, cols in cells:
-                if cols == 0:
-                    content.append({
-                        "component": "VCol",
-                        "props": {"md": md, "class": cls + " py-0 d-none d-md-flex"},
-                        "text": text,
-                    })
-                else:
-                    content.append({
-                        "component": "VCol",
-                        "props": {"cols": cols, "md": md, "class": cls + " py-0"},
-                        "text": text,
-                    })
-            return {"component": "VRow", "props": {"dense": True, "class": "py-0 align-center"}, "content": content}
+        def run_tr(cells: List[tuple], head: bool = False) -> dict:
+            return {
+                "component": "tr",
+                "content": [
+                    {"component": "th" if head else "td", "props": {"class": cls}, "text": text}
+                    for text, cls in cells
+                ],
+            }
 
-        header_cells = [(h, "text-caption font-weight-bold text-medium-emphasis", md, cols) for h, md, cols in run_columns]
-        run_rows = [run_row(header_cells)]
+        run_table = {
+            "component": "VTable",
+            "props": {"hover": True, "density": "compact"},
+            "content": [
+                {"component": "thead", "content": [run_tr([(h, cls) for h, cls, _ in run_columns], head=True)]},
+                {"component": "tbody", "content": []},
+            ],
+        }
         recent_records = list(reversed(round_records[-10:]))
         for r in recent_records:
             p = int(r.get("pnl", 0) or 0)
             c = int(r.get("cost", 0) or 0)
             rr = pnl_rate(p, c)
             pc = pnl_color(p)
-            run_rows.append(run_row([
-                (str(r.get("time", "—")), "text-body-2", 3, 6),
-                (f"{int(r.get('count', 0) or 0):,}", "text-body-2", 1, 0),
-                (f"{int(r.get('cost', 0) or 0):,}", "text-body-2", 2, 0),
-                (f"{int(r.get('earned', 0) or 0):,}", "text-body-2", 2, 0),
-                (f"{p:+,} / {rr:+.1f}%", f"text-body-2 font-weight-bold text-{pc}", 2, 3),
-                (f"{int(r.get('balance', 0) or 0):,}", "text-body-2", 2, 3),
+            run_table["content"][1]["content"].append(run_tr([
+                (str(r.get("time", "—")), "text-body-2 text-start ps-3"),
+                (f"{int(r.get('count', 0) or 0):,}", "text-body-2 text-center d-none d-md-table-cell"),
+                (f"{int(r.get('cost', 0) or 0):,}", "text-body-2 text-center d-none d-md-table-cell"),
+                (f"{int(r.get('earned', 0) or 0):,}", "text-body-2 text-center d-none d-md-table-cell"),
+                (f"{p:+,} / {rr:+.1f}%", f"text-body-2 font-weight-bold text-center text-{pc}"),
+                (f"{int(r.get('balance', 0) or 0):,}", "text-body-2 text-center"),
             ]))
 
         page = [
@@ -631,13 +674,22 @@ class HHLottery(_PluginBase):
                         {"component": "VCard", "props": {"variant": "tonal", "color": "primary", "class": "h-100"}, "content": [
                             {"component": "VCardTitle", "text": "🎰 我的抽奖信息"},
                             {"component": "VCardText", "props": {"class": "pa-2"}, "content": [
-                                metric_block("💰 当前憨豆", f"{last_balance:,}", "info", f"截至 {last_time}", big=True),
-                                metric_block("🎲 总抽奖数", f"{total_count:,}", "", "历史以来累计抽奖数", big=True),
-                                metric_block("📈 今日盈亏", f"{today_pnl:+,}", pnl_color(today_pnl),
-                                             f"盈亏率 {today_rate:+.1f}%", pnl_color(today_rate), big=True),
-                                metric_block("📈 总盈亏", f"{total_pnl:+,}", pnl_color(total_pnl),
-                                             f"盈亏率 {total_rate:+.1f}%", pnl_color(total_rate), big=True),
-                                metric_block("🕐 最近运行", last_time, "", last_stop_reason or "—"),
+                                {"component": "VRow", "props": {"dense": True}, "content": [
+                                    {"component": "VCol", "props": {"cols": 6}, "content": [
+                                        kpi_card("💰", "当前憨豆", f"{last_balance:,}", "info", f"截至 {last_time}"),
+                                    ]},
+                                    {"component": "VCol", "props": {"cols": 6}, "content": [
+                                        kpi_card("🎲", "总抽奖数", f"{total_count:,}", "", "历史以来累计"),
+                                    ]},
+                                    {"component": "VCol", "props": {"cols": 6}, "content": [
+                                        kpi_card("📈", "今日盈亏", f"{today_pnl:+,}", pnl_color(today_pnl), f"盈亏率 {today_rate:+.1f}%"),
+                                    ]},
+                                    {"component": "VCol", "props": {"cols": 6}, "content": [
+                                        kpi_card("📊", "总盈亏", f"{total_pnl:+,}", pnl_color(total_pnl), f"盈亏率 {total_rate:+.1f}%"),
+                                    ]},
+                                ]},
+                                {"component": "div", "props": {"class": "text-caption text-medium-emphasis mt-2"},
+                                 "text": f"🕐 最近运行：{last_time}　{last_stop_reason or ''}"},
                             ]},
                         ]}
                     ]},
@@ -669,7 +721,7 @@ class HHLottery(_PluginBase):
                     {"component": "VCol", "props": {"cols": 12}, "content": [
                         {"component": "VCard", "props": {"variant": "tonal", "color": "warning"}, "content": [
                             {"component": "VCardTitle", "text": "📋 运行记录（最近 10 次）"},
-                            {"component": "VCardText", "props": {"class": "pa-2"}, "content": run_rows},
+                            {"component": "VCardText", "props": {"class": "pa-2"}, "content": [run_table]},
                         ]}
                     ]},
                 ],
