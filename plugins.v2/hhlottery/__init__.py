@@ -398,10 +398,15 @@ class HHLottery(_PluginBase):
         # KPI 卡：图标头像 + 标签 + 大数值（借鉴站点数据统计插件）
         def kpi_card(icon: str, label: str, value: str, value_color: str = "", note: str = "") -> dict:
             value_cls = f"text-h6 font-weight-bold text-{value_color}" if value_color else "text-h6 font-weight-bold"
+            # KPI 数值在手机两列卡片中可缩小，长盈亏数字不换行、不溢出
+            value_props = {
+                "class": value_cls,
+                "style": "font-size: clamp(0.8rem, 3.8vw, 1.25rem); white-space: nowrap; line-height: 1.2;",
+            }
             right = [
                 {"component": "span", "props": {"class": "text-caption text-medium-emphasis"}, "text": label},
                 {"component": "div", "props": {"class": "d-flex align-center flex-wrap"}, "content": [
-                    {"component": "span", "props": {"class": value_cls}, "text": value},
+                    {"component": "span", "props": value_props, "text": value},
                 ]},
             ]
             if note:
@@ -411,10 +416,10 @@ class HHLottery(_PluginBase):
                 "props": {"variant": "tonal", "class": "h-100"},
                 "content": [
                     {"component": "VCardText", "props": {"class": "d-flex align-center"}, "content": [
-                        {"component": "VAvatar", "props": {"rounded": True, "variant": "tonal", "color": "primary", "size": "x-large", "class": "me-3"}, "content": [
-                            {"component": "span", "props": {"class": "text-h6"}, "text": icon},
+                        {"component": "VAvatar", "props": {"rounded": True, "variant": "tonal", "color": "primary", "size": "x-large", "class": "me-3 flex-shrink-0"}, "content": [
+                            {"component": "span", "props": {"style": "font-size: 2.25rem; line-height: 1;"}, "text": icon},
                         ]},
-                        {"component": "div", "content": right},
+                        {"component": "div", "props": {"class": "flex-grow-1", "style": "min-width: 0;"}, "content": right},
                     ]},
                 ],
             }
