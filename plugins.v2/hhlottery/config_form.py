@@ -36,29 +36,29 @@ def build_form() -> Tuple[List[dict], Dict[str, Any]]:
     def col(md: int, component: dict) -> dict:
         return {"component": "VCol", "props": {"cols": 12, "md": md}, "content": [component]}
 
-    def textfield(model: str, label: str, **kwargs) -> dict:
+    def _props(model: str, label: str, kwargs: dict) -> dict:
         props = {"model": model, "label": label}
         for k, v in kwargs.items():
-            props[k] = v
-        return {"component": "VTextField", "props": props}
+            # Vuetify 用连字符 prop 名（如 persistent-hint），Python 关键字参数只能写
+            # 下划线（persistent_hint），这里统一转成连字符，否则小字说明不显示
+            props[k.replace("_", "-")] = v
+        return props
+
+    def textfield(model: str, label: str, **kwargs) -> dict:
+        return {"component": "VTextField", "props": _props(model, label, kwargs)}
 
     def switch(model: str, label: str, color: str = "primary", **kwargs) -> dict:
-        props = {"model": model, "label": label, "color": color}
-        for k, v in kwargs.items():
-            props[k] = v
+        props = _props(model, label, kwargs)
+        props["color"] = color
         return {"component": "VSwitch", "props": props}
 
     def select(model: str, label: str, items: List[dict], **kwargs) -> dict:
-        props = {"model": model, "label": label, "items": items}
-        for k, v in kwargs.items():
-            props[k] = v
+        props = _props(model, label, kwargs)
+        props["items"] = items
         return {"component": "VSelect", "props": props}
 
     def textarea(model: str, label: str, **kwargs) -> dict:
-        props = {"model": model, "label": label}
-        for k, v in kwargs.items():
-            props[k] = v
-        return {"component": "VTextarea", "props": props}
+        return {"component": "VTextarea", "props": _props(model, label, kwargs)}
 
     def alert(atype: str, text: str, **kwargs) -> dict:
         props = {"type": atype, "variant": "tonal", "text": text}
@@ -112,18 +112,20 @@ def build_form() -> Tuple[List[dict], Dict[str, Any]]:
                 # ── 抽奖参数 ──
                 card("mdi-slot-machine", "success", "抽奖参数", [
                     row([
-                        col(3, textfield("interval", "⏱ 抽奖间隔（秒）", type="number", placeholder="8",
+                        col(4, textfield("interval", "⏱ 抽奖间隔（秒）", type="number", placeholder="8",
                                          hint="最小 3 秒", persistent_hint=True)),
-                        col(3, textfield("max_count", "🎲 每次抽多少抽", type="number", placeholder="0=一抽到底",
+                        col(4, textfield("max_count", "🎲 每次抽多少抽", type="number", placeholder="0=一抽到底",
                                          hint="0 = 一抽到底（保留线以下停）", persistent_hint=True)),
-                        col(3, textfield("reserve_beans", "💰 保留憨豆", type="number", placeholder="0",
+                        col(4, textfield("reserve_beans", "💰 保留憨豆", type="number", placeholder="0",
                                          hint="一抽到底时留多少不动", persistent_hint=True)),
-                        col(3, switch("grand_stop", "大奖自动停", "warning")),
                     ]),
                     row([
-                        col(3, switch("gambler_mode", "赌徒模式", "error",
+                        col(4, switch("grand_stop", "大奖止损", "warning",
+                                       hint="命中大奖后自动停止", persistent_hint=True)),
+                        col(4, switch("gambler_mode", "赌徒模式", "error",
                                        hint="忽略最大抽奖次数，一直抽到爆", persistent_hint=True)),
-                        col(3, switch("clean_mail", "清理站内信", "info")),
+                        col(4, switch("clean_mail", "清理站内信", "info",
+                                       hint="抽奖后自动清理站内信", persistent_hint=True)),
                     ]),
                     row([
                         col(12, textfield("big_prize_keywords", "🏆 大奖关键词", placeholder="VIP,邀请,780000",
