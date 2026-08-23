@@ -167,7 +167,7 @@ class HHLottery(_PluginBase):
             self._interval = int(config.get("interval") or self.DEFAULT_INTERVAL)
             self._max_count = int(config.get("max_count") or 0)
             self._reserve_beans = int(config.get("reserve_beans") or 0)
-            self._log_lines = max(1, int(config.get("log_lines") or 200))
+            self._log_lines = 200
             self._notify = config.get("notify", True)
             self._big_prize_keywords = config.get("big_prize_keywords", "VIP,邀请,780000")
             self._clean_mail = config.get("clean_mail", True)
@@ -214,7 +214,6 @@ class HHLottery(_PluginBase):
                     "interval": self._interval,
                     "max_count": 0 if self._gambler_mode else self._max_count,
                     "reserve_beans": self._reserve_beans,
-                    "log_lines": self._log_lines,
                     "notify": self._notify,
                     "big_prize_keywords": self._big_prize_keywords,
                     "clean_mail": self._clean_mail,
@@ -241,7 +240,6 @@ class HHLottery(_PluginBase):
                     "interval": self._interval,
                     "max_count": 0 if self._gambler_mode else self._max_count,
                     "reserve_beans": self._reserve_beans,
-                    "log_lines": self._log_lines,
                     "notify": self._notify,
                     "big_prize_keywords": self._big_prize_keywords,
                     "clean_mail": self._clean_mail,
@@ -271,7 +269,6 @@ class HHLottery(_PluginBase):
                 "interval": self._interval,
                 "max_count": 0 if self._gambler_mode else self._max_count,
                 "reserve_beans": self._reserve_beans,
-                "log_lines": self._log_lines,
                 "notify": self._notify,
                 "big_prize_keywords": self._big_prize_keywords,
                 "clean_mail": self._clean_mail,
