@@ -113,11 +113,11 @@ def build_form() -> Tuple[List[dict], Dict[str, Any]]:
                 card("mdi-slot-machine", "success", "抽奖参数", [
                     row([
                         col(4, textfield("interval", "⏱ 抽奖间隔（秒）", type="number", placeholder="8",
-                                         hint="最小 3 秒", persistent_hint=True)),
-                        col(4, textfield("max_count", "🎲 每次抽多少抽", type="number", placeholder="0=一抽到底",
-                                         hint="0 = 一抽到底（保留线以下停）", persistent_hint=True)),
+                                         hint="基础间隔，被限流时自动退避（最高 30 秒）", persistent_hint=True)),
+                        col(4, textfield("max_count", "🎲 每次抽多少抽", type="number", placeholder="0=不限制",
+                                         hint="0 = 不限制（但受限于保留憨豆）", persistent_hint=True)),
                         col(4, textfield("reserve_beans", "💰 保留憨豆", type="number", placeholder="0",
-                                         hint="一抽到底时留多少不动", persistent_hint=True)),
+                                         hint="赌徒模式时留多少不动", persistent_hint=True)),
                     ]),
                     row([
                         col(4, switch("grand_stop", "大奖止损", "warning",
