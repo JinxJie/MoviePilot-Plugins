@@ -407,31 +407,44 @@ class HHLottery(_PluginBase):
                 rows.append({"component": "div", "props": {"class": note_cls}, "text": note})
             return {"component": "div", "content": rows}
 
-        # 详情行：支持值带颜色
-        def detail_lines(items: List[tuple]) -> List[dict]:
-            return [
-                {"component": "div", "props": {"class": "d-flex justify-space-between text-body-2 py-0"}, "content": [
-                    {"component": "span", "text": k},
-                    {"component": "span",
-                     "props": {"class": f"font-weight-bold text-{c}"} if c else {},
-                     "text": v},
-                ]}
-                for k, v, c in items
+        # 奖品总览卡（6 项 2×3 网格）
+        def prize_overview_card(title: str, metrics: dict, groups: List[dict]) -> dict:
+            def _group_total(key: str) -> int:
+                for g in groups:
+                    if g["key"] == key:
+                        return sum(int(e["total"]) for _, e in g["items"])
+                return 0
+
+            items = [
+                ("📧", "邀请", f"{metrics.get('invite_hits', 0):,}", "个"),
+                ("🌈", "彩虹ID", f"{_group_total('rainbow'):,}", "天"),
+                ("👑", "VIP", f"{metrics.get('vip_hits', 0):,}", "次"),
+                ("✅", "补签卡", f"{_group_total('makeup'):,}", "个"),
+                ("📤", "上传量", f"{_group_total('upload'):,}", "GB"),
+                ("📛", "改名卡", f"{_group_total('rename_card'):,}", "张"),
             ]
 
-        # 大奖摘要卡（带图标）
-        def summary_card(title: str, metrics: dict) -> dict:
+            def _cell(icon: str, label: str, value: str, unit: str) -> dict:
+                return {
+                    "component": "VCol",
+                    "props": {"cols": 4, "class": "text-center py-2"},
+                    "content": [
+                        {"component": "div", "props": {"class": "text-caption text-medium-emphasis"}, "text": f"{icon} {label}"},
+                        {"component": "div", "props": {"class": "text-body-2 font-weight-bold mt-1"}, "text": f"{value} {unit}"},
+                    ],
+                }
+
+            rows = [
+                {"component": "VRow", "props": {"dense": True}, "content": [_cell(*it) for it in items[:3]]},
+                {"component": "VRow", "props": {"dense": True}, "content": [_cell(*it) for it in items[3:]]},
+            ]
+
             return {
                 "component": "VCard",
                 "props": {"variant": "tonal", "class": "h-100"},
                 "content": [
                     {"component": "VCardTitle", "text": title},
-                    {"component": "VCardText", "props": {"class": "pa-2"}, "content": detail_lines([
-                        ("👑 VIP 次数", f"{metrics.get('vip_hits', 0):,}", None),
-                        ("✉️ 邀请次数", f"{metrics.get('invite_hits', 0):,}", None),
-                        ("💱 VIP 折算憨豆", f"{metrics.get('vip_converted_earned', 0):,}", None),
-                        ("💰 大额憨豆", f"{metrics.get('big_beans_earned', 0):,}", None),
-                    ])},
+                    {"component": "VCardText", "props": {"class": "pa-2"}, "content": rows},
                 ],
             }
 
@@ -442,9 +455,10 @@ class HHLottery(_PluginBase):
                 {"key": "upload", "icon": "📤", "label": "总上传量", "unit": " GB", "items": []},
                 {"key": "rainbow", "icon": "🌈", "label": "彩虹ID", "unit": " 天", "items": []},
                 {"key": "makeup", "icon": "✅", "label": "补签卡", "unit": " 个", "items": []},
-                {"key": "invite", "icon": "✉️", "label": "邀请", "unit": " 个", "items": []},
+                {"key": "rename_card", "icon": "📛", "label": "改名卡", "unit": " 张", "items": []},
+                {"key": "invite", "icon": "📧", "label": "邀请", "unit": " 个", "items": []},
                 {"key": "vip", "icon": "👑", "label": "VIP", "unit": " 天", "items": []},
-                {"key": "big_beans", "icon": "💰", "label": "大额憨豆", "unit": "", "items": []},
+                {"key": "big_beans", "icon": "🫘", "label": "大额憨豆", "unit": "", "items": []},
             ]
 
         def build_prize_groups(records: List[dict]) -> tuple:
@@ -482,6 +496,8 @@ class HHLottery(_PluginBase):
                     gmap["rainbow"]["items"].append((name, e))
                 elif ptype == "makeup":
                     gmap["makeup"]["items"].append((name, e))
+                elif ptype == "rename_card":
+                    gmap["rename_card"]["items"].append((name, e))
                 elif ptype == "invite":
                     gmap["invite"]["items"].append((name, e))
                 elif ptype == "vip":
@@ -495,7 +511,7 @@ class HHLottery(_PluginBase):
         # 分组明细卡片（汇总头 + 次数/累计/占比）
         def prize_detail_card(title: str, groups: List[dict], total_wins: int, summary: dict) -> dict:
             def _col(text: str, cls: str, md: int) -> dict:
-                return {"component": "VCol", "props": {"cols": 12, "md": md, "class": cls + " py-0"}, "text": text}
+                return {"component": "VCol", "props": {"cols": md, "md": md, "class": cls + " py-0"}, "text": text}
 
             def _row(cells: List[tuple]) -> dict:
                 return {"component": "VRow", "props": {"dense": True, "class": "py-0"}, "content": [_col(t, c, m) for t, c, m in cells]}
@@ -562,20 +578,34 @@ class HHLottery(_PluginBase):
         today_groups, today_wins = build_prize_groups(today_records)
         history_groups, history_wins = build_prize_groups(round_records)
 
-        # 运行记录表格（最新在上，最多 10 次）
-        run_columns = [("结束时间", 3), ("抽奖次数", 1), ("消耗", 2), ("获得", 2), ("盈亏/盈亏率", 2), ("余额", 2)]
+        # 运行记录表格（最新在上，最多 10 次）；移动端只显示 时间/盈亏/余额
+        run_columns = [
+            ("结束时间", 3, 6),    # (label, md列宽, 移动端cols；cols=0 表示移动端隐藏)
+            ("抽奖次数", 1, 0),
+            ("消耗", 2, 0),
+            ("获得", 2, 0),
+            ("盈亏/盈亏率", 2, 3),
+            ("余额", 2, 3),
+        ]
 
         def run_row(cells: List[tuple]) -> dict:
-            return {
-                "component": "VRow",
-                "props": {"dense": True, "class": "py-0"},
-                "content": [
-                    {"component": "VCol", "props": {"cols": 12, "md": md, "class": cls + " py-0"}, "text": text}
-                    for text, cls, md in cells
-                ],
-            }
+            content = []
+            for text, cls, md, cols in cells:
+                if cols == 0:
+                    content.append({
+                        "component": "VCol",
+                        "props": {"md": md, "class": cls + " py-0 d-none d-md-flex"},
+                        "text": text,
+                    })
+                else:
+                    content.append({
+                        "component": "VCol",
+                        "props": {"cols": cols, "md": md, "class": cls + " py-0"},
+                        "text": text,
+                    })
+            return {"component": "VRow", "props": {"dense": True, "class": "py-0"}, "content": content}
 
-        header_cells = [(h, "text-caption font-weight-bold text-medium-emphasis", md) for h, md in run_columns]
+        header_cells = [(h, "text-caption font-weight-bold text-medium-emphasis", md, cols) for h, md, cols in run_columns]
         run_rows = [run_row(header_cells)]
         recent_records = list(reversed(round_records[-10:]))
         for r in recent_records:
@@ -584,12 +614,12 @@ class HHLottery(_PluginBase):
             rr = pnl_rate(p, c)
             pc = pnl_color(p)
             run_rows.append(run_row([
-                (str(r.get("time", "—")), "text-body-2", 3),
-                (f"{int(r.get('count', 0) or 0):,}", "text-body-2", 1),
-                (f"{int(r.get('cost', 0) or 0):,}", "text-body-2", 2),
-                (f"{int(r.get('earned', 0) or 0):,}", "text-body-2", 2),
-                (f"{p:+,} / {rr:+.1f}%", f"text-body-2 font-weight-bold text-{pc}", 2),
-                (f"{int(r.get('balance', 0) or 0):,}", "text-body-2", 2),
+                (str(r.get("time", "—")), "text-body-2", 3, 6),
+                (f"{int(r.get('count', 0) or 0):,}", "text-body-2", 1, 0),
+                (f"{int(r.get('cost', 0) or 0):,}", "text-body-2", 2, 0),
+                (f"{int(r.get('earned', 0) or 0):,}", "text-body-2", 2, 0),
+                (f"{p:+,} / {rr:+.1f}%", f"text-body-2 font-weight-bold text-{pc}", 2, 3),
+                (f"{int(r.get('balance', 0) or 0):,}", "text-body-2", 2, 3),
             ]))
 
         page = [
@@ -611,7 +641,7 @@ class HHLottery(_PluginBase):
                         ]}
                     ]},
                     {"component": "VCol", "props": {"cols": 12, "md": 6}, "content": [
-                        summary_card("🏆 大奖摘要（总览）", history_metrics)
+                        prize_overview_card("🏆 奖品总览", history_metrics, history_groups)
                     ]},
                 ],
             },
@@ -1259,6 +1289,10 @@ class HHLottery(_PluginBase):
         # 补签卡
         if "补签" in text:
             return "makeup", "补签卡", 1
+
+        # 改名卡
+        if "改名" in text:
+            return "rename_card", "改名卡", 1
 
         # 上传量
         if "上传" in text or "GB" in text.upper():
