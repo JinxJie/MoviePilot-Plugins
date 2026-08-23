@@ -76,13 +76,13 @@ def build_form() -> Tuple[List[dict], Dict[str, Any]]:
                 # ── 基础设置 ──
                 card("mdi-cog", "primary", "基础设置", [
                     row([
-                        col(3, switch("enabled", "启用插件", "primary",
+                        col(3, switch("enabled", "⚙️ 启用插件", "primary",
                                        hint="总开关，打开后才按定时表达式自动抽奖", persistent_hint=True)),
-                        col(3, switch("notify", "开启通知", "info",
+                        col(3, switch("notify", "🔔 开启通知", "info",
                                        hint="抽奖结束、汇总、命中大奖时推送消息", persistent_hint=True)),
-                        col(3, switch("onlyonce", "立即运行一次", "success",
+                        col(3, switch("onlyonce", "▶️ 立即运行一次", "success",
                                        hint="保存后立即触发一次抽奖，结束后不重复运行", persistent_hint=True)),
-                        col(3, switch("stop_current", "停止当前抽奖", "error",
+                        col(3, switch("stop_current", "🛑 停止当前抽奖", "error",
                                        hint="保存后立刻打断进行中的抽奖，已抽成绩保留", persistent_hint=True)),
                     ]),
                     row([
@@ -122,11 +122,11 @@ def build_form() -> Tuple[List[dict], Dict[str, Any]]:
                                          hint="赌徒模式时留多少不动", persistent_hint=True)),
                     ]),
                     row([
-                        col(4, switch("grand_stop", "大奖止损", "warning",
+                        col(4, switch("grand_stop", "🏆 大奖止损", "warning",
                                        hint="命中大奖后自动停止", persistent_hint=True)),
-                        col(4, switch("gambler_mode", "赌徒模式", "error",
+                        col(4, switch("gambler_mode", "🎲 赌徒模式", "error",
                                        hint="忽略最大抽奖次数，一直抽到爆", persistent_hint=True)),
-                        col(4, switch("clean_mail", "清理站内信", "info",
+                        col(4, switch("clean_mail", "🧹 清理站内信", "info",
                                        hint="抽奖后自动清理站内信", persistent_hint=True)),
                     ]),
                     row([
