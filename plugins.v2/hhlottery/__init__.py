@@ -403,7 +403,7 @@ class HHLottery(_PluginBase):
                 right.append({"component": "div", "props": {"class": "text-caption text-medium-emphasis"}, "text": note})
             return {
                 "component": "VCard",
-                "props": {"variant": "tonal"},
+                "props": {"variant": "tonal", "class": "h-100"},
                 "content": [
                     {"component": "VCardText", "props": {"class": "d-flex align-center"}, "content": [
                         {"component": "VAvatar", "props": {"rounded": True, "variant": "tonal", "color": "primary", "size": "x-large", "class": "me-3"}, "content": [
@@ -539,26 +539,30 @@ class HHLottery(_PluginBase):
             ]))
             content.append({"component": "VDivider", "props": {"class": "my-1"}})
 
-            # 饼图：各组中奖次数占比
+            # 饼图：具体奖项明细（名称：次数·累计·占比），图例在右侧
             pie_labels = []
             pie_series = []
             for g in groups:
-                items = g["items"]
-                if not items:
-                    continue
-                cnt = sum(int(e["count"]) for _, e in items)
-                if cnt > 0:
-                    pie_labels.append(f"{g['icon']} {g['label']}")
+                for name, e in g["items"]:
+                    cnt = int(e["count"])
+                    if cnt <= 0:
+                        continue
+                    total = int(e["total"])
+                    ratio = cnt / total_wins * 100 if total_wins > 0 else 0.0
+                    pie_labels.append(f"{name}：{cnt}·{total}{g['unit']}·{ratio:.1f}%")
                     pie_series.append(cnt)
             content.append({
                 "component": "VApexChart",
                 "props": {
-                    "height": "220",
+                    "height": "260",
                     "options": {
                         "chart": {"type": "pie"},
                         "labels": pie_labels,
-                        "title": {"text": f"🎁 奖品分布 · 共 {total_wins:,} 次"},
-                        "legend": {"show": True, "position": "bottom"},
+                        "title": {
+                            "text": f"🎁 具体奖项明细 · 共 {total_wins:,} 次",
+                            "subtitle": {"text": "名称：次数 · 累计 · 占比"},
+                        },
+                        "legend": {"show": True, "position": "right"},
                         "plotOptions": {"pie": {"expandOnClick": False}},
                         "noData": {"text": "暂无数据"},
                     },
@@ -567,7 +571,7 @@ class HHLottery(_PluginBase):
             })
             content.append({"component": "VDivider", "props": {"class": "my-1"}})
 
-            # 奖项表格（VTable，hover 高亮）
+            # 奖项表格（VTable，hover 高亮）：只显示分组汇总，具体奖项见饼图
             tbody = []
             for g in groups:
                 items = g["items"]
@@ -585,17 +589,6 @@ class HHLottery(_PluginBase):
                         {"component": "td", "props": {"class": "text-body-2 font-weight-bold text-right"}, "text": f"{g_ratio:.1f}%"},
                     ],
                 })
-                for name, e in items:
-                    ratio = e["count"] / total_wins * 100 if total_wins > 0 else 0.0
-                    tbody.append({
-                        "component": "tr",
-                        "content": [
-                            {"component": "td", "props": {"class": "text-body-2 text-medium-emphasis text-start ps-3"}, "text": f"　　{name}"},
-                            {"component": "td", "props": {"class": "text-body-2 text-right"}, "text": f"{e['count']:,}"},
-                            {"component": "td", "props": {"class": "text-body-2 text-right"}, "text": f"{e['total']:,}{g['unit']}"},
-                            {"component": "td", "props": {"class": "text-body-2 text-right"}, "text": f"{ratio:.1f}%"},
-                        ],
-                    })
             content.append({
                 "component": "VTable",
                 "props": {"hover": True, "density": "compact"},
