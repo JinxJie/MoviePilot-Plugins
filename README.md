@@ -37,7 +37,7 @@ tests/                         # 官方测试
 
 ## 开发新插件
 
-参考 [官方插件开发文档](https://wiki.movie-pilot.org/docs/development/create-plugin)。
+参考 [官方插件开发文档](https://wiki.movie-pilot.org/)。
 
 ## 致谢
 
