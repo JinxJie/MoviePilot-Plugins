@@ -18,8 +18,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from app.core.config import settings
 from app.log import logger
-from app.schemas.types import NotificationType
+from app.schemas.types import EventType, NotificationType
 from app.utils.http import RequestUtils
+from apscheduler.triggers.cron import CronTrigger
 
 from app.plugins import _PluginBase
 from .helpers import _load_cookiecloud_helper, _load_site_oper, _short_domain, _number
@@ -211,6 +212,8 @@ class HHLottery(_PluginBase):
                 self.update_config({
                     "enabled": self._enabled,
                     "cron": self._cron,
+                    "cookie_source": self._cookie_source,
+                    "host": self._host,
                     "cookie": self._cookie,
                     "site_url": self._site_url,
                     "interval": self._interval,
@@ -226,6 +229,9 @@ class HHLottery(_PluginBase):
                     "stop_current": False,
                     "config_seq": self._config_seq,
                     "save_id": self._save_id,
+                    "save_epoch": self._save_epoch,
+                    "save_marker": self._save_marker,
+                    "seen_save_marker": self._seen_save_marker,
                     "current_save_version": self._current_save_version,
                 })
                 self._api_stop_lottery()
@@ -238,6 +244,8 @@ class HHLottery(_PluginBase):
                 self.update_config({
                     "enabled": self._enabled,
                     "cron": self._cron,
+                    "cookie_source": self._cookie_source,
+                    "host": self._host,
                     "cookie": self._cookie,
                     "site_url": self._site_url,
                     "interval": self._interval,
@@ -253,6 +261,9 @@ class HHLottery(_PluginBase):
                     "stop_current": False,
                     "config_seq": self._config_seq,
                     "save_id": self._save_id,
+                    "save_epoch": self._save_epoch,
+                    "save_marker": self._save_marker,
+                    "seen_save_marker": self._seen_save_marker,
                     "current_save_version": self._current_save_version,
                 })
                 if not self._running:
@@ -268,6 +279,8 @@ class HHLottery(_PluginBase):
             self.update_config({
                 "enabled": self._enabled,
                 "cron": self._cron,
+                "cookie_source": self._cookie_source,
+                "host": self._host,
                 "cookie": self._cookie,
                 "site_url": self._site_url,
                 "interval": self._interval,
@@ -283,6 +296,9 @@ class HHLottery(_PluginBase):
                 "stop_current": False,
                 "config_seq": self._config_seq,
                 "save_id": self._save_id,
+                "save_epoch": self._save_epoch,
+                "save_marker": self._save_marker,
+                "seen_save_marker": self._seen_save_marker,
                 "current_save_version": self._current_save_version,
             })
             return
@@ -318,15 +334,15 @@ class HHLottery(_PluginBase):
                 "path": "/hhlottery/run",
                 "summary": "立即运行抽奖",
                 "description": "触发一次抽奖任务",
-                "method": "POST",
-                "func": self._api_run_lottery,
+                "endpoint": self._api_run_lottery,
+                "methods": ["POST"],
             },
             {
                 "path": "/hhlottery/stats",
                 "summary": "获取抽奖统计",
                 "description": "获取当前统计和历史记录",
-                "method": "GET",
-                "func": self._api_get_stats,
+                "endpoint": self._api_get_stats,
+                "methods": ["GET"],
             },
         ]
 
@@ -763,8 +779,7 @@ class HHLottery(_PluginBase):
                 {
                     "id": "hhlottery",
                     "name": "HHCLUB 自动抽奖",
-                    "trigger": "cron",
-                    "cron": self._cron,
+                    "trigger": CronTrigger.from_crontab(self._cron),
                     "func": self._lottery_job,
                     "kwargs": {},
                 }
@@ -834,10 +849,10 @@ class HHLottery(_PluginBase):
         try:
             # 1. 获取初始余额
             balance, cost_per_draw = self._fetch_balance()
-            if balance is None:
-                stop_reason = "无法获取余额，请检查 Cookie 是否有效"
+            if balance is None or cost_per_draw <= 0:
+                stop_reason = f"无法安全解析余额或单次消耗（余额={balance!r}，单次消耗={cost_per_draw!r}），为避免误抽已停止"
                 logger.error(stop_reason)
-                self._send_notification(self._format_notification("❌ HHCLUB 抽奖异常", stop_reason))
+                self._send_notification(self._format_notification("HHCLUB 抽奖异常", stop_reason))
                 self._running = False
                 return
 
@@ -1209,6 +1224,10 @@ class HHLottery(_PluginBase):
                 alt_match = re.search(r'use[-_]?bean[^>]*>\s*(\d[\d,]*)', html)
                 if alt_match:
                     cost = self._parse_number(alt_match.group(1))
+
+            if balance is None or cost <= 0:
+                logger.warning(f"余额/单次消耗解析失败或无效（余额={balance!r}，单次消耗={cost!r}）")
+                return None, 0
 
             return balance, cost
 
@@ -1813,9 +1832,8 @@ class HHLottery(_PluginBase):
         API: 手动停止抽奖
         """
         self._stop_requested = True
-        self._running = False
         self._config_seq += 1
-        logger.info(f"🛑 服务停止，配置序号推进到 {self._config_seq}，version={self._current_save_version!r}")
+        logger.info(f"🛑 服务停止请求已发送，配置序号推进到 {self._config_seq}，等待抽奖线程退出")
         logger.info(f"🛑 收到手动停止请求，配置序号推进到 {self._config_seq}，version={self._current_save_version!r}")
         return {"success": True, "message": "已请求停止抽奖"}
 
@@ -1834,6 +1852,5 @@ class HHLottery(_PluginBase):
         停止插件服务
         """
         self._stop_requested = True
-        self._running = False
         self._config_seq += 1
-        logger.info(f"🛑 服务停止，配置序号推进到 {self._config_seq}，version={self._current_save_version!r}")
+        logger.info(f"🛑 服务停止请求已发送，配置序号推进到 {self._config_seq}，等待抽奖线程退出")
