@@ -6,7 +6,7 @@
 
 | 插件 | 目录 | 版本 | 说明 |
 |------|------|------|------|
-| HHCLUB 自动抽奖 | [`plugins.v2/hhlottery`](plugins.v2/hhlottery) | 1.0.7 | HHCLUB 自动抽奖增强版，支持定时抽奖、手动停止、最新配置接管、大奖通知、今日/历史汇总 |
+| HHCLUB 自动抽奖 | [`plugins.v2/hhlottery`](plugins.v2/hhlottery) | 1.0.7 | HHCLUB 自动抽奖增强版，支持定时抽奖、手动停止、最新配置接管、大奖通知、今日/历史汇总。若你也在使用油猴脚本，可使用 [HHCLUB 自动抽奖 · 庆典版](https://greasyfork.org/zh-CN/scripts/591722)。 |
 
 ## 安装
 
