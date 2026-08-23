@@ -332,12 +332,13 @@ class HHLottery(_PluginBase):
     def get_page(self) -> List[dict]:
         """
         统计页面：
-        - 我的抽奖信息
+        - 我的抽奖信息（含盈亏率、最近运行）
         - 大奖摘要
         - 今日汇总
         - 今日大奖命中详情
         - 历史汇总
         - 历史大奖命中详情
+        - 运行记录
         """
         data = self._load_data()
         stats = data.get("stats", {})
@@ -375,23 +376,48 @@ class HHLottery(_PluginBase):
         today_pnl = today_sum["earned"] - today_sum["cost"]
         history_pnl = history_sum["earned"] - history_sum["cost"]
 
-        def info_col(label: str, value: str, color: str = "primary") -> dict:
-            return {
-                "component": "VCol",
-                "props": {"cols": 12, "sm": 6, "md": 3},
-                "content": [
-                    {"component": "div", "props": {"class": "text-caption text-medium-emphasis"}, "text": label},
-                    {"component": "div", "props": {"class": f"text-h6 font-weight-bold text-{color}"}, "text": value},
-                ],
-            }
+        # 盈亏率（盈亏 ÷ 消耗 × 100%，消耗为 0 时按 0%）
+        def pnl_rate(pnl: int, cost: int) -> float:
+            return pnl / cost * 100 if cost > 0 else 0.0
 
-        def detail_lines(items: List[tuple[str, str]]) -> List[dict]:
+        today_rate = pnl_rate(today_pnl, today_sum["cost"])
+        total_rate = pnl_rate(total_pnl, total_cost)
+
+        # 盈亏颜色：正绿负红
+        def pnl_color(v) -> str:
+            return "success" if v >= 0 else "error"
+
+        # 最近一次运行信息
+        last_record = round_records[-1] if round_records else None
+        last_time = str(last_record.get("time") or "—") if last_record else "—"
+        last_stop_reason = str(last_record.get("stop_reason") or "") if last_record else ""
+
+        # 指标块：label 左 + 值右（带颜色），下方小字说明
+        def metric_block(label: str, value: str, value_color: str = "", note: str = "", note_color: str = "") -> dict:
+            value_cls = f"text-body-1 font-weight-bold text-{value_color}" if value_color else "text-body-1 font-weight-bold"
+            rows = [{
+                "component": "div",
+                "props": {"class": "d-flex justify-space-between align-center py-1"},
+                "content": [
+                    {"component": "span", "props": {"class": "text-body-1 text-medium-emphasis"}, "text": label},
+                    {"component": "span", "props": {"class": value_cls}, "text": value},
+                ],
+            }]
+            if note:
+                note_cls = f"text-caption pl-8 text-{note_color}" if note_color else "text-caption text-medium-emphasis pl-8"
+                rows.append({"component": "div", "props": {"class": note_cls}, "text": note})
+            return {"component": "div", "content": rows}
+
+        # 详情行：支持值带颜色
+        def detail_lines(items: List[tuple]) -> List[dict]:
             return [
                 {"component": "div", "props": {"class": "d-flex justify-space-between text-body-2 py-1"}, "content": [
                     {"component": "span", "text": k},
-                    {"component": "span", "text": v},
+                    {"component": "span",
+                     "props": {"class": f"font-weight-bold text-{c}"} if c else {},
+                     "text": v},
                 ]}
-                for k, v in items
+                for k, v, c in items
             ]
 
         def stats_card(title: str, metrics: dict) -> dict:
@@ -401,13 +427,43 @@ class HHLottery(_PluginBase):
                 "content": [
                     {"component": "VCardTitle", "text": title},
                     {"component": "VCardText", "content": detail_lines([
-                        ("VIP 次数", f"{metrics.get('vip_hits', 0):,}"),
-                        ("邀请次数", f"{metrics.get('invite_hits', 0):,}"),
-                        ("VIP 折算憨豆", f"{metrics.get('vip_converted_earned', 0):,}"),
-                        ("大额憨豆", f"{metrics.get('big_beans_earned', 0):,}"),
+                        ("VIP 次数", f"{metrics.get('vip_hits', 0):,}", None),
+                        ("邀请次数", f"{metrics.get('invite_hits', 0):,}", None),
+                        ("VIP 折算憨豆", f"{metrics.get('vip_converted_earned', 0):,}", None),
+                        ("大额憨豆", f"{metrics.get('big_beans_earned', 0):,}", None),
                     ])},
                 ],
             }
+
+        # 运行记录表格（最新在上，最多 10 次）
+        run_columns = [("结束时间", 3), ("抽奖次数", 1), ("消耗", 2), ("获得", 2), ("盈亏/盈亏率", 2), ("余额", 2)]
+
+        def run_row(cells: List[tuple]) -> dict:
+            return {
+                "component": "VRow",
+                "props": {"class": "pa-1"},
+                "content": [
+                    {"component": "VCol", "props": {"cols": 12, "md": md, "class": cls}, "text": text}
+                    for text, cls, md in cells
+                ],
+            }
+
+        header_cells = [(h, "text-caption font-weight-bold text-medium-emphasis", md) for h, md in run_columns]
+        run_rows = [run_row(header_cells)]
+        recent_records = list(reversed(round_records[-10:]))
+        for r in recent_records:
+            p = int(r.get("pnl", 0) or 0)
+            c = int(r.get("cost", 0) or 0)
+            rr = pnl_rate(p, c)
+            pc = pnl_color(p)
+            run_rows.append(run_row([
+                (str(r.get("time", "—")), "text-body-2", 3),
+                (f"{int(r.get('count', 0) or 0):,}", "text-body-2", 1),
+                (f"{int(r.get('cost', 0) or 0):,}", "text-body-2", 2),
+                (f"{int(r.get('earned', 0) or 0):,}", "text-body-2", 2),
+                (f"{p:+,} / {rr:+.1f}%", f"text-body-2 font-weight-bold text-{pc}", 2),
+                (f"{int(r.get('balance', 0) or 0):,}", "text-body-2", 2),
+            ]))
 
         page = [
             {
@@ -417,12 +473,13 @@ class HHLottery(_PluginBase):
                         {"component": "VCard", "props": {"variant": "tonal", "class": "h-100"}, "content": [
                             {"component": "VCardTitle", "text": "🎰 我的抽奖信息"},
                             {"component": "VCardText", "content": [
-                                {"component": "VRow", "content": [
-                                    info_col("💰 当前憨豆", f"{last_balance:,}", "info"),
-                                    info_col("🟢/🔴 今日盈亏", f"{today_pnl:+,}", "success" if today_pnl >= 0 else "error"),
-                                    info_col("🟢/🔴 总盈亏", f"{total_pnl:+,}", "success" if total_pnl >= 0 else "error"),
-                                    info_col("🎲 总抽奖数", f"{total_count:,}", "primary"),
-                                ]},
+                                metric_block("💰 当前憨豆", f"{last_balance:,}", "info", f"截至 {last_time}"),
+                                metric_block("🎲 总抽奖数", f"{total_count:,}", "", "历史以来累计抽奖数"),
+                                metric_block("📈 今日盈亏", f"{today_pnl:+,}", pnl_color(today_pnl),
+                                             f"盈亏率 {today_rate:+.1f}%", pnl_color(today_rate)),
+                                metric_block("📈 总盈亏", f"{total_pnl:+,}", pnl_color(total_pnl),
+                                             f"盈亏率 {total_rate:+.1f}%", pnl_color(total_rate)),
+                                metric_block("🕐 最近运行", last_time, "", last_stop_reason or "—"),
                             ]},
                         ]}
                     ]},
@@ -438,11 +495,11 @@ class HHLottery(_PluginBase):
                         {"component": "VCard", "props": {"variant": "tonal", "class": "h-100"}, "content": [
                             {"component": "VCardTitle", "text": "📅 今日汇总"},
                             {"component": "VCardText", "content": detail_lines([
-                                ("今日轮次", f"{len(today_records):,}"),
-                                ("今日抽奖", f"{today_sum['count']:,}"),
-                                ("今日消耗", f"{today_sum['cost']:,}"),
-                                ("今日收益", f"{today_sum['earned']:,}"),
-                                ("今日盈亏", f"{today_pnl:+,}"),
+                                ("今日轮次", f"{len(today_records):,}", None),
+                                ("今日抽奖", f"{today_sum['count']:,}", None),
+                                ("今日消耗", f"{today_sum['cost']:,}", None),
+                                ("今日收益", f"{today_sum['earned']:,}", "success"),
+                                ("今日盈亏", f"{today_pnl:+,}", pnl_color(today_pnl)),
                             ])},
                         ]}
                     ]},
@@ -458,16 +515,27 @@ class HHLottery(_PluginBase):
                         {"component": "VCard", "props": {"variant": "tonal", "class": "h-100"}, "content": [
                             {"component": "VCardTitle", "text": "📚 历史汇总"},
                             {"component": "VCardText", "content": detail_lines([
-                                ("历史轮次", f"{len(round_records):,}"),
-                                ("历史抽奖", f"{history_sum['count']:,}"),
-                                ("历史消耗", f"{history_sum['cost']:,}"),
-                                ("历史收益", f"{history_sum['earned']:,}"),
-                                ("历史盈亏", f"{history_pnl:+,}"),
+                                ("历史轮次", f"{len(round_records):,}", None),
+                                ("历史抽奖", f"{history_sum['count']:,}", None),
+                                ("历史消耗", f"{history_sum['cost']:,}", None),
+                                ("历史收益", f"{history_sum['earned']:,}", "success"),
+                                ("历史盈亏", f"{history_pnl:+,}", pnl_color(history_pnl)),
                             ])},
                         ]}
                     ]},
                     {"component": "VCol", "props": {"cols": 12, "md": 6}, "content": [
                         stats_card("🏅 历史大奖命中详情", history_metrics)
+                    ]},
+                ],
+            },
+            {
+                "component": "VRow",
+                "content": [
+                    {"component": "VCol", "props": {"cols": 12}, "content": [
+                        {"component": "VCard", "props": {"variant": "tonal"}, "content": [
+                            {"component": "VCardTitle", "text": "📋 运行记录（最近 10 次）"},
+                            {"component": "VCardText", "content": run_rows},
+                        ]}
                     ]},
                 ],
             },
@@ -782,7 +850,7 @@ class HHLottery(_PluginBase):
                 balance = final_balance
 
             # 4. 保存统计数据
-            self._save_round_stats(round_stats, balance)
+            self._save_round_stats(round_stats, balance, stop_reason)
 
             # 4.1 对账日志
             data = self._load_data()
@@ -1228,7 +1296,7 @@ class HHLottery(_PluginBase):
         data["stats"] = stats
         return data
 
-    def _save_round_stats(self, round_stats: dict, final_balance: int):
+    def _save_round_stats(self, round_stats: dict, final_balance: int, stop_reason: str = ""):
         """
         保存本轮统计到累计数据
         """
@@ -1248,6 +1316,8 @@ class HHLottery(_PluginBase):
             "cost": round_stats["cost"],
             "earned": round_stats.get("earned", 0),
             "pnl": pnl,
+            "balance": final_balance,
+            "stop_reason": stop_reason,
             "wins": round_stats["wins"],
             "prizes": round_stats.get("prize_detail", {}),
             "vip_hits": round_stats.get("vip_hits", 0),
