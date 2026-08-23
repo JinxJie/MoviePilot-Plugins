@@ -130,13 +130,16 @@ def build_form() -> Tuple[List[dict], Dict[str, Any]]:
                                        hint="抽奖后自动清理站内信", persistent_hint=True)),
                     ]),
                     row([
-                        col(12, textfield("big_prize_keywords", "🏆 大奖关键词", placeholder="VIP,邀请,780000",
+                        col(6, textfield("big_prize_keywords", "🏆 大奖关键词", placeholder="VIP,邀请,780000",
                                          hint="逗号分隔，匹配到则推送通知", persistent_hint=True)),
+                        col(6, textfield("notify_interval", "📡 状态播报间隔", type="number", placeholder="100",
+                                         hint="每 N 抽发送一次运行状态播报，0 = 关闭", persistent_hint=True)),
                     ]),
                 ]),
 
                 # ── 说明 ──
                 card("mdi-information", "info", "说明", [
+                    row([col(12, alert("info", "🤖 本插件最大作用：无需一直盯着电脑，后台自动抽奖，结束后自动推送抽奖结果通知；如需实时查看抽奖数据、随时手动操作，建议搭配油猴脚本使用！"))]),
                     row([col(12, alert("info", "💡 若你也在使用油猴脚本，可使用 HHCLUB 自动抽奖 · 庆典版 https://greasyfork.org/zh-CN/scripts/591722"))]),
                 ]),
             ],
@@ -154,6 +157,7 @@ def build_form() -> Tuple[List[dict], Dict[str, Any]]:
         "max_count": 0,
         "reserve_beans": 0,
         "notify": True,
+        "notify_interval": 100,
         "clean_mail": True,
         "onlyonce": False,
         "stop_current": False,

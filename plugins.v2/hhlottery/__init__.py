@@ -136,6 +136,7 @@ class HHLottery(_PluginBase):
     _max_count: int = 0
     _reserve_beans: int = 0
     _notify: bool = True
+    _notify_interval: int = 100
     _big_prize_keywords: str = "VIP,邀请,780000"
     _stats_migrated: bool = False
     _clean_mail: bool = True
@@ -169,6 +170,7 @@ class HHLottery(_PluginBase):
             self._reserve_beans = int(config.get("reserve_beans") or 0)
             self._log_lines = 200
             self._notify = config.get("notify", True)
+            self._notify_interval = int(config.get("notify_interval") or 100)
             self._big_prize_keywords = config.get("big_prize_keywords", "VIP,邀请,780000")
             self._clean_mail = config.get("clean_mail", True)
             self._grand_stop = config.get("grand_stop", True)
@@ -215,6 +217,7 @@ class HHLottery(_PluginBase):
                     "max_count": 0 if self._gambler_mode else self._max_count,
                     "reserve_beans": self._reserve_beans,
                     "notify": self._notify,
+                    "notify_interval": self._notify_interval,
                     "big_prize_keywords": self._big_prize_keywords,
                     "clean_mail": self._clean_mail,
                     "grand_stop": self._grand_stop,
@@ -241,6 +244,7 @@ class HHLottery(_PluginBase):
                     "max_count": 0 if self._gambler_mode else self._max_count,
                     "reserve_beans": self._reserve_beans,
                     "notify": self._notify,
+                    "notify_interval": self._notify_interval,
                     "big_prize_keywords": self._big_prize_keywords,
                     "clean_mail": self._clean_mail,
                     "grand_stop": self._grand_stop,
@@ -270,6 +274,7 @@ class HHLottery(_PluginBase):
                 "max_count": 0 if self._gambler_mode else self._max_count,
                 "reserve_beans": self._reserve_beans,
                 "notify": self._notify,
+                "notify_interval": self._notify_interval,
                 "big_prize_keywords": self._big_prize_keywords,
                 "clean_mail": self._clean_mail,
                 "grand_stop": self._grand_stop,
@@ -781,6 +786,9 @@ class HHLottery(_PluginBase):
             "big_beans_earned": 0,
         }
 
+        # 状态播报区间奖品统计（每 notify_interval 抽重置一次）
+        segment_prizes = {}
+
         # 停止原因
         stop_reason = ""
 
@@ -975,6 +983,19 @@ class HHLottery(_PluginBase):
                 entry["type"] = prize_type
                 entry["value"] = int(prize_value or 0)
                 round_stats["prize_detail"][prize_name] = entry
+
+                # 状态播报：累计区间奖品，每 N 抽发送一次运行状态通知
+                seg_entry = segment_prizes.get(prize_name)
+                if not isinstance(seg_entry, dict):
+                    seg_entry = {"type": prize_type, "count": 0, "total": 0, "value": int(prize_value or 0)}
+                seg_entry["count"] = int(seg_entry.get("count", 0) or 0) + 1
+                seg_entry["total"] = int(seg_entry.get("total", 0) or 0) + int(prize_value or 0)
+                seg_entry["type"] = prize_type
+                segment_prizes[prize_name] = seg_entry
+
+                if self._notify_interval > 0 and draw_count % self._notify_interval == 0:
+                    self._send_status_report(draw_count, segment_prizes, self._notify_interval)
+                    segment_prizes = {}
 
                 # 记录历史
                 history_item = {
@@ -1593,6 +1614,49 @@ class HHLottery(_PluginBase):
             )
         except Exception as e:
             logger.error(f"发送通知失败：{e}")
+
+    def _send_status_report(self, total_draw: int, segment_prizes: dict, interval: int) -> None:
+        """
+        每 N 抽发送一次运行状态播报（含当前区间中奖明细）
+        """
+        if not self._notify:
+            return
+
+        # 按分组汇总（与统计页一致）
+        group_defs = [
+            ("beans", "🫘", "憨豆"),
+            ("upload", "📤", "上传量"),
+            ("rainbow", "🌈", "彩虹ID"),
+            ("makeup", "✅", "补签卡"),
+            ("rename_card", "📛", "改名卡"),
+            ("invite", "📧", "邀请"),
+            ("vip", "👑", "VIP"),
+            ("big_beans", "🫘", "大额憨豆"),
+        ]
+        group_counts = {k: 0 for k, _, _ in group_defs}
+        for name, e in (segment_prizes or {}).items():
+            if not isinstance(e, dict):
+                continue
+            ptype = e.get("type", "")
+            key = ptype if ptype in group_counts else "beans"
+            group_counts[key] += int(e.get("count", 0) or 0)
+
+        now = time.strftime("%Y-%m-%d %H:%M:%S")
+        lines = [
+            f"🕒 {now}",
+            f"📡 运行状态播报（第 {total_draw:,} 抽）📡",
+            "🟢 插件运行一切正常，稳如老狗，你安心去忙",
+            f"🏆 近 {interval} 抽中奖明细：",
+        ]
+        total_wins = 0
+        for key, icon, label in group_defs:
+            cnt = group_counts[key]
+            if cnt <= 0:
+                continue
+            total_wins += cnt
+            lines.append(f"{icon} {label} × {cnt} 次")
+        lines.append(f"🎯 累计中奖 {total_wins} 次，下一抽可能就出 VIP，别错过通知哦")
+        self._send_notification("\n".join(lines))
 
     def _build_summary(
         self,
