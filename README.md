@@ -1,5 +1,7 @@
 # MoviePilot-Plugins
 
+JinxJie 的 MoviePilot 第三方插件库。
+
 本库 fork 自官方 [jxxghp/MoviePilot-Plugins](https://github.com/jxxghp/MoviePilot-Plugins)，仅保留本人开发的插件，便于后续持续新增。
 
 ## 插件列表
