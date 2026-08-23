@@ -563,10 +563,7 @@ class HHLottery(_PluginBase):
                     "options": {
                         "chart": {"type": "pie"},
                         "labels": pie_labels,
-                        "title": {
-                            "text": f"🎁 具体奖项明细 · 共 {total_wins:,} 次",
-                            "subtitle": {"text": "名称：次数 · 累计 · 占比"},
-                        },
+                        "subtitle": {"text": "名称：次数 · 累计 · 占比"},
                         "legend": {"show": True, "position": "right"},
                         "plotOptions": {"pie": {"expandOnClick": False}},
                         "noData": {"text": "暂无数据"},
