@@ -392,9 +392,10 @@ class HHLottery(_PluginBase):
         last_time = str(last_record.get("time") or "—") if last_record else "—"
         last_stop_reason = str(last_record.get("stop_reason") or "") if last_record else ""
 
-        # 指标块：label 左 + 值右（带颜色），下方小字说明
-        def metric_block(label: str, value: str, value_color: str = "", note: str = "", note_color: str = "") -> dict:
-            value_cls = f"text-body-1 font-weight-bold text-{value_color}" if value_color else "text-body-1 font-weight-bold"
+        # 指标块：label 左 + 值右（带颜色），下方小字说明；big=True 放大数字
+        def metric_block(label: str, value: str, value_color: str = "", note: str = "", note_color: str = "", big: bool = False) -> dict:
+            size = "text-h5" if big else "text-body-1"
+            value_cls = f"{size} font-weight-bold text-{value_color}" if value_color else f"{size} font-weight-bold"
             rows = [{
                 "component": "div",
                 "props": {"class": "d-flex justify-space-between align-center py-1"},
@@ -420,20 +421,125 @@ class HHLottery(_PluginBase):
                 for k, v, c in items
             ]
 
-        def stats_card(title: str, metrics: dict) -> dict:
+        # 大奖摘要卡（带图标）
+        def summary_card(title: str, metrics: dict) -> dict:
             return {
                 "component": "VCard",
                 "props": {"variant": "tonal", "class": "h-100"},
                 "content": [
                     {"component": "VCardTitle", "text": title},
-                    {"component": "VCardText", "content": detail_lines([
-                        ("VIP 次数", f"{metrics.get('vip_hits', 0):,}", None),
-                        ("邀请次数", f"{metrics.get('invite_hits', 0):,}", None),
-                        ("VIP 折算憨豆", f"{metrics.get('vip_converted_earned', 0):,}", None),
-                        ("大额憨豆", f"{metrics.get('big_beans_earned', 0):,}", None),
+                    {"component": "VCardText", "props": {"class": "pa-3"}, "content": detail_lines([
+                        ("👑 VIP 次数", f"{metrics.get('vip_hits', 0):,}", None),
+                        ("✉️ 邀请次数", f"{metrics.get('invite_hits', 0):,}", None),
+                        ("💱 VIP 折算憨豆", f"{metrics.get('vip_converted_earned', 0):,}", None),
+                        ("💰 大额憨豆", f"{metrics.get('big_beans_earned', 0):,}", None),
                     ])},
                 ],
             }
+
+        # 奖品分组定义（顺序即显示顺序）
+        def _prize_group_defs() -> List[dict]:
+            return [
+                {"key": "beans", "icon": "🫘", "label": "憨豆总数", "unit": "", "items": []},
+                {"key": "upload", "icon": "📤", "label": "总上传量", "unit": " GB", "items": []},
+                {"key": "rainbow", "icon": "🌈", "label": "彩虹ID", "unit": " 天", "items": []},
+                {"key": "makeup", "icon": "✅", "label": "补签卡", "unit": " 个", "items": []},
+                {"key": "invite", "icon": "✉️", "label": "邀请", "unit": " 个", "items": []},
+                {"key": "vip", "icon": "👑", "label": "VIP", "unit": " 天", "items": []},
+                {"key": "big_beans", "icon": "💰", "label": "大额憨豆", "unit": "", "items": []},
+            ]
+
+        def build_prize_groups(records: List[dict]) -> tuple:
+            """汇总奖品并按类别分组，返回 (groups, total_wins)。"""
+            agg = {}
+            for r in records:
+                for name, val in (r.get("prizes") or {}).items():
+                    if isinstance(val, dict):
+                        ptype = val.get("type", "unknown")
+                        cnt = int(val.get("count", 0) or 0)
+                        total = int(val.get("total", 0) or 0)
+                        value = int(val.get("value", 0) or 0)
+                    else:
+                        cnt = int(val or 0)
+                        ptype, _, value = self._parse_prize(name)
+                        total = cnt * value
+                    e = agg.get(name)
+                    if e is None:
+                        e = {"type": ptype, "count": 0, "total": 0, "value": value}
+                    e["count"] += cnt
+                    e["total"] += total
+                    e["type"] = ptype
+                    e["value"] = value
+                    agg[name] = e
+
+            groups = _prize_group_defs()
+            gmap = {g["key"]: g for g in groups}
+            for name, e in agg.items():
+                ptype = e["type"]
+                if ptype == "beans":
+                    gmap["big_beans" if e["value"] >= self.BIG_BEANS_THRESHOLD else "beans"]["items"].append((name, e))
+                elif ptype == "upload":
+                    gmap["upload"]["items"].append((name, e))
+                elif ptype == "rainbow":
+                    gmap["rainbow"]["items"].append((name, e))
+                elif ptype == "makeup":
+                    gmap["makeup"]["items"].append((name, e))
+                elif ptype == "invite":
+                    gmap["invite"]["items"].append((name, e))
+                elif ptype == "vip":
+                    gmap["vip"]["items"].append((name, e))
+                else:
+                    gmap["beans"]["items"].append((name, e))
+
+            total_wins = sum(e["count"] for e in agg.values())
+            return groups, total_wins
+
+        # 分组明细卡片（次数 / 累计 / 占比）
+        def prize_detail_card(title: str, groups: List[dict], total_wins: int) -> dict:
+            def _col(text: str, cls: str, md: int) -> dict:
+                return {"component": "VCol", "props": {"cols": 12, "md": md, "class": cls}, "text": text}
+
+            def _row(cells: List[tuple]) -> dict:
+                return {"component": "VRow", "props": {"class": "pa-1"}, "content": [_col(t, c, m) for t, c, m in cells]}
+
+            rows = [_row([
+                ("奖项", "text-caption font-weight-bold text-medium-emphasis", 4),
+                ("次数", "text-caption font-weight-bold text-medium-emphasis text-right", 2),
+                ("累计", "text-caption font-weight-bold text-medium-emphasis text-right", 3),
+                ("占比", "text-caption font-weight-bold text-medium-emphasis text-right", 3),
+            ])]
+            for g in groups:
+                items = g["items"]
+                if not items:
+                    continue
+                g_count = sum(int(e["count"]) for _, e in items)
+                g_total = sum(int(e["total"]) for _, e in items)
+                g_ratio = g_count / total_wins * 100 if total_wins > 0 else 0.0
+                rows.append(_row([
+                    (f"{g['icon']} {g['label']}", "text-body-2 font-weight-bold", 4),
+                    (f"{g_count:,}", "text-body-2 font-weight-bold text-right", 2),
+                    (f"{g_total:,}{g['unit']}", "text-body-2 font-weight-bold text-right", 3),
+                    (f"{g_ratio:.1f}%", "text-body-2 font-weight-bold text-right", 3),
+                ]))
+                for name, e in items:
+                    ratio = e["count"] / total_wins * 100 if total_wins > 0 else 0.0
+                    rows.append(_row([
+                        (f"　　{name}", "text-body-2 text-medium-emphasis", 4),
+                        (f"{e['count']:,}", "text-body-2 text-right", 2),
+                        (f"{e['total']:,}{g['unit']}", "text-body-2 text-right", 3),
+                        (f"{ratio:.1f}%", "text-body-2 text-right", 3),
+                    ]))
+            return {
+                "component": "VCard",
+                "props": {"variant": "tonal", "class": "h-100"},
+                "content": [
+                    {"component": "VCardTitle", "text": title},
+                    {"component": "VCardText", "props": {"class": "pa-3"}, "content": rows},
+                ],
+            }
+
+        today_groups, today_wins = build_prize_groups(today_records)
+        history_groups, history_wins = build_prize_groups(round_records)
 
         # 运行记录表格（最新在上，最多 10 次）
         run_columns = [("结束时间", 3), ("抽奖次数", 1), ("消耗", 2), ("获得", 2), ("盈亏/盈亏率", 2), ("余额", 2)]
@@ -472,19 +578,19 @@ class HHLottery(_PluginBase):
                     {"component": "VCol", "props": {"cols": 12, "md": 6}, "content": [
                         {"component": "VCard", "props": {"variant": "tonal", "class": "h-100"}, "content": [
                             {"component": "VCardTitle", "text": "🎰 我的抽奖信息"},
-                            {"component": "VCardText", "content": [
-                                metric_block("💰 当前憨豆", f"{last_balance:,}", "info", f"截至 {last_time}"),
-                                metric_block("🎲 总抽奖数", f"{total_count:,}", "", "历史以来累计抽奖数"),
+                            {"component": "VCardText", "props": {"class": "pa-3"}, "content": [
+                                metric_block("💰 当前憨豆", f"{last_balance:,}", "info", f"截至 {last_time}", big=True),
+                                metric_block("🎲 总抽奖数", f"{total_count:,}", "", "历史以来累计抽奖数", big=True),
                                 metric_block("📈 今日盈亏", f"{today_pnl:+,}", pnl_color(today_pnl),
-                                             f"盈亏率 {today_rate:+.1f}%", pnl_color(today_rate)),
+                                             f"盈亏率 {today_rate:+.1f}%", pnl_color(today_rate), big=True),
                                 metric_block("📈 总盈亏", f"{total_pnl:+,}", pnl_color(total_pnl),
-                                             f"盈亏率 {total_rate:+.1f}%", pnl_color(total_rate)),
+                                             f"盈亏率 {total_rate:+.1f}%", pnl_color(total_rate), big=True),
                                 metric_block("🕐 最近运行", last_time, "", last_stop_reason or "—"),
                             ]},
                         ]}
                     ]},
                     {"component": "VCol", "props": {"cols": 12, "md": 6}, "content": [
-                        stats_card("🏆 大奖摘要（总览）", history_metrics)
+                        summary_card("🏆 大奖摘要（总览）", history_metrics)
                     ]},
                 ],
             },
@@ -494,7 +600,7 @@ class HHLottery(_PluginBase):
                     {"component": "VCol", "props": {"cols": 12, "md": 6}, "content": [
                         {"component": "VCard", "props": {"variant": "tonal", "class": "h-100"}, "content": [
                             {"component": "VCardTitle", "text": "📅 今日汇总"},
-                            {"component": "VCardText", "content": detail_lines([
+                            {"component": "VCardText", "props": {"class": "pa-3"}, "content": detail_lines([
                                 ("今日轮次", f"{len(today_records):,}", None),
                                 ("今日抽奖", f"{today_sum['count']:,}", None),
                                 ("今日消耗", f"{today_sum['cost']:,}", None),
@@ -504,7 +610,7 @@ class HHLottery(_PluginBase):
                         ]}
                     ]},
                     {"component": "VCol", "props": {"cols": 12, "md": 6}, "content": [
-                        stats_card("🎁 今日大奖命中详情", today_metrics)
+                        prize_detail_card("🎯 今日抽奖命中明细", today_groups, today_wins)
                     ]},
                 ],
             },
@@ -514,7 +620,7 @@ class HHLottery(_PluginBase):
                     {"component": "VCol", "props": {"cols": 12, "md": 6}, "content": [
                         {"component": "VCard", "props": {"variant": "tonal", "class": "h-100"}, "content": [
                             {"component": "VCardTitle", "text": "📚 历史汇总"},
-                            {"component": "VCardText", "content": detail_lines([
+                            {"component": "VCardText", "props": {"class": "pa-3"}, "content": detail_lines([
                                 ("历史轮次", f"{len(round_records):,}", None),
                                 ("历史抽奖", f"{history_sum['count']:,}", None),
                                 ("历史消耗", f"{history_sum['cost']:,}", None),
@@ -524,7 +630,7 @@ class HHLottery(_PluginBase):
                         ]}
                     ]},
                     {"component": "VCol", "props": {"cols": 12, "md": 6}, "content": [
-                        stats_card("🏅 历史大奖命中详情", history_metrics)
+                        prize_detail_card("🎯 历史抽奖命中明细", history_groups, history_wins)
                     ]},
                 ],
             },
@@ -534,7 +640,7 @@ class HHLottery(_PluginBase):
                     {"component": "VCol", "props": {"cols": 12}, "content": [
                         {"component": "VCard", "props": {"variant": "tonal"}, "content": [
                             {"component": "VCardTitle", "text": "📋 运行记录（最近 10 次）"},
-                            {"component": "VCardText", "content": run_rows},
+                            {"component": "VCardText", "props": {"class": "pa-3"}, "content": run_rows},
                         ]}
                     ]},
                 ],
@@ -787,9 +893,14 @@ class HHLottery(_PluginBase):
                             vip_converted_total += converted
                             logger.info(f"🔄 VIP奖励已转换为憨豆 {converted:,}（文案判断）")
                 round_stats["wins"] += 1
-                round_stats["prize_detail"][prize_name] = (
-                    round_stats["prize_detail"].get(prize_name, 0) + 1
-                )
+                entry = round_stats["prize_detail"].get(prize_name)
+                if not isinstance(entry, dict):
+                    entry = {"type": prize_type, "count": 0, "total": 0, "value": int(prize_value or 0)}
+                entry["count"] = int(entry.get("count", 0) or 0) + 1
+                entry["total"] = int(entry.get("total", 0) or 0) + int(prize_value or 0)
+                entry["type"] = prize_type
+                entry["value"] = int(prize_value or 0)
+                round_stats["prize_detail"][prize_name] = entry
 
                 # 记录历史
                 history_item = {
@@ -1142,10 +1253,10 @@ class HHLottery(_PluginBase):
         if "邀请" in text:
             return "invite", "邀请卡", 1
 
-        # 彩虹糖
-        if "彩虹糖" in text:
+        # 彩虹 ID / 彩虹糖
+        if "彩虹" in text:
             value = self._extract_number(text)
-            return "rainbow", f"彩虹糖 × {value}", value
+            return "rainbow", f"彩虹ID × {value} 天", value
 
         # 补签卡
         if "补签" in text:
@@ -1284,8 +1395,26 @@ class HHLottery(_PluginBase):
             total_cost += int(r.get("cost", 0) or 0)
             total_wins += int(r.get("wins", 0) or 0)
             total_earned += int(r.get("earned", 0) or 0)
-            for name, cnt in (r.get("prizes") or {}).items():
-                prize_detail[name] = prize_detail.get(name, 0) + int(cnt or 0)
+            for name, val in (r.get("prizes") or {}).items():
+                if isinstance(val, dict):
+                    # 新结构 {type, count, total, value}
+                    ptype = val.get("type", "unknown")
+                    cnt = int(val.get("count", 0) or 0)
+                    total = int(val.get("total", 0) or 0)
+                    value = int(val.get("value", 0) or 0)
+                else:
+                    # 旧结构 {name: count}，重新解析类型和单次值
+                    cnt = int(val or 0)
+                    ptype, _, value = self._parse_prize(name)
+                    total = cnt * value
+                entry = prize_detail.get(name)
+                if not isinstance(entry, dict):
+                    entry = {"type": ptype, "count": 0, "total": 0, "value": value}
+                entry["count"] = int(entry.get("count", 0) or 0) + cnt
+                entry["total"] = int(entry.get("total", 0) or 0) + total
+                entry["type"] = ptype
+                entry["value"] = value
+                prize_detail[name] = entry
 
         stats["total_count"] = total_count
         stats["total_cost"] = total_cost
@@ -1412,8 +1541,12 @@ class HHLottery(_PluginBase):
         if prize_detail:
             lines.append("")
             lines.append("🎁 奖品统计：")
-            for name, count in sorted(prize_detail.items(), key=lambda x: -x[1]):
-                lines.append(f"• {name} × {count}")
+
+            def _count_of(v) -> int:
+                return int(v.get("count", 0) or 0) if isinstance(v, dict) else int(v or 0)
+
+            for name, val in sorted(prize_detail.items(), key=lambda x: -_count_of(x[1])):
+                lines.append(f"• {name} × {_count_of(val):,}")
 
         return "\n".join(lines).strip()
 
@@ -1436,12 +1569,14 @@ class HHLottery(_PluginBase):
             today_pnl += r.get("pnl", 0)
             today_cost += r.get("cost", 0)
             today_count += r.get("count", 0)
-            for name, cnt in (r.get("prizes") or {}).items():
+            for name, val in (r.get("prizes") or {}).items():
+                cnt = int(val.get("count", 0) or 0) if isinstance(val, dict) else int(val or 0)
                 today_prizes[name] += cnt
 
         overall_prizes = Counter()
         for r in round_records:
-            for name, cnt in (r.get("prizes") or {}).items():
+            for name, val in (r.get("prizes") or {}).items():
+                cnt = int(val.get("count", 0) or 0) if isinstance(val, dict) else int(val or 0)
                 overall_prizes[name] += cnt
 
         total_count = stats.get("total_count", 0)
