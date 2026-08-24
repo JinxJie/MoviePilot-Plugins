@@ -19,6 +19,7 @@ import shutil
 import sys
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import quote
 
 from app.core.config import settings
 from app.core.plugin import PluginManager
@@ -83,7 +84,8 @@ class PluginClinic(_PluginBase):
         self._cron = "0 2 * * *"
         self._notify = True
         self._exclude_pids = ""
-
+        self._clean_feedback = ""
+        self._clean_feedback_color = ""
     def init_plugin(self, config: dict = None):
         """
         初始化插件配置
@@ -227,6 +229,12 @@ class PluginClinic(_PluginBase):
         # 用户先阅读具体问题，再决定是否对该项执行，不依赖前端临时勾选状态。
         api_base = f"plugin/{self.__class__.__name__}/clean?apikey={settings.API_TOKEN}"
 
+        def clean_api(pid: str = "", scope: str = "selected") -> str:
+            """把参数同时放入 URL 和 params，兼容不同 MP 前端版本。"""
+            if pid:
+                return f"{api_base}&pid={quote(pid)}&scope={scope}"
+            return f"{api_base}&scope={scope}"
+
         def cell(text: Any, cls: str) -> dict:
             return {"component": "td", "props": {"class": cls}, "text": str(text or "—")}
 
@@ -255,10 +263,9 @@ class PluginClinic(_PluginBase):
                 "text": "清理此项",
                 "events": {
                     "click": {
-                        "api": api_base,
+                        "api": clean_api(pid, "selected"),
                         "method": "post",
-                        "params": {"pid": pid, "scope": "selected"},
-                    }
+                    },
                 },
             }
 
@@ -380,7 +387,7 @@ class PluginClinic(_PluginBase):
                                             },
                                             "text": "一键清理全部异常",
                                             "events": {"click": {
-                                                "api": api_base,
+                                                "api": clean_api("", "all"),
                                                 "method": "post",
                                                 "params": {"scope": "all"},
                                             }},
@@ -816,7 +823,9 @@ class PluginClinic(_PluginBase):
             return {"code": 0, "message": "无效清理范围", "data": []}
         if scope == "selected" and not selected:
             return {"code": 0, "message": "请先选择要清理的插件", "data": []}
-        return self._clean(pids=selected, scope=scope)
+        result = self._clean(pids=selected, scope=scope)
+        result["success"] = result.get("code") == 1
+        return result
 
     def _api_records(self, *args, **kwargs) -> dict:
         """API：获取清理记录"""
