@@ -346,26 +346,6 @@ class NodeSeek(_PluginBase):
                             }
                         ]
                     },
-                    {
-                        "component": "VCol", "props": {"cols": 12}, "content": [
-                            {
-                                "component": "VCard", "props": {"variant": "flat", "elevation": 2, "class": "h-100 rounded-lg"}, "content": [
-                                    {"component": "VCardItem", "props": {"class": "pb-1"}, "content": [
-                                        {"component": "VAvatar", "props": {"color": "info", "variant": "tonal", "rounded": "lg"}, "content": [{"component": "span", "props": {"style": "font-size: 1.35rem"}, "text": "💡"}]},
-                                        {"component": "VCardTitle", "text": "运行指南"},
-                                        {"component": "VCardSubtitle", "text": "让签到稳定运行的几个关键点"},
-                                    ]},
-                                    {"component": "VCardText", "content": [
-                                        {"component": "div", "props": {"class": "text-body-2"}, "content": [
-                                            {"component": "p", "props": {"class": "mb-1"}, "text": "📌 NodeSeek 每天 00:00 刷新签到，越早签到排名越靠前，可能获得额外鸡腿。"},
-                                            {"component": "p", "props": {"class": "mb-1"}, "text": "🔐 Cookie 失效时插件会发通知提醒，在浏览器 F12 → Application → Cookies 重新复制。"},
-                                            {"component": "p", "props": {"class": "mb-1"}, "text": "🛡️ 插件使用 curl_cffi 模拟 Chrome 指纹，绕过 Cloudflare 拦截；未安装时回退 requests。"},
-                                        ]},
-                                    ]},
-                                ]
-                            }
-                        ]
-                    },
                 ],
             },
             {
