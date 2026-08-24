@@ -97,7 +97,6 @@ class NodeSeek(_PluginBase):
         self._notify = True
         self._use_proxy = False
         self._ns_random = False
-        self._random_delay = 0
         self._cookie_first = True
         self._accounts = ""
         self._solver_type = "yescaptcha"
@@ -118,7 +117,6 @@ class NodeSeek(_PluginBase):
             self._notify = config.get("notify", True)
             self._use_proxy = config.get("use_proxy", False)
             self._ns_random = config.get("ns_random", False)
-            self._random_delay = max(0, int(config.get("random_delay", 0) or 0))
             self._cookie_first = config.get("cookie_first", True)
             self._accounts = (config.get("accounts") or "").strip()
             self._solver_type = (config.get("solver_type") or "yescaptcha").strip().lower()
@@ -160,7 +158,6 @@ class NodeSeek(_PluginBase):
                     "notify": self._notify,
                     "use_proxy": self._use_proxy,
                     "ns_random": self._ns_random,
-                    "random_delay": self._random_delay,
                     "cookie_first": self._cookie_first,
                     "accounts": self._accounts,
                     "solver_type": self._solver_type,
@@ -414,15 +411,13 @@ class NodeSeek(_PluginBase):
     # ======================== 核心逻辑 ========================
 
     def _sign_job(self):
-        """定时签到任务入口，先随机等待 0~N 分钟。"""
+        """定时签到任务入口，固定等待约 1 分钟，降低固定时刻请求特征。"""
         if self._running:
             logger.warning("NodeSeek 签到任务正在运行，跳过本次")
             return
-        if self._random_delay > 0:
-            delay = random.randint(0, self._random_delay * 60)
-            if delay:
-                logger.info("NodeSeek 签到：定时触发后随机延迟 %d 秒再执行", delay)
-                time.sleep(delay)
+        delay = random.randint(50, 70)
+        logger.info("NodeSeek 签到：定时任务已触发，约 %d 秒后开始", delay)
+        time.sleep(delay)
         self._running = True
         try:
             self._do_sign(source="cron")
