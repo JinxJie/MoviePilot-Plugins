@@ -6,9 +6,11 @@
 - 定位无法加载的插件（缺依赖 / 代码错误 / 目录缺失）与卸载残留（目录 / 数据 / 配置 / 模块缓存）
 - 手动勾选清理，一键清理干净，让重新安装一路顺畅
 - 清理记录留痕，可回溯
+- 可选定时扫描：发现问题只发送通知，不自动清理
 
 说明：
-- 无定时任务，纯手动操作
+- 打开插件页面会自动扫描
+- 定时任务只负责扫描和告警，清理始终由用户手动确认
 - 自动排除插件自身与排除列表中的插件
 """
 
@@ -25,6 +27,7 @@ from app.db.systemconfig_oper import SystemConfigOper
 from app.log import logger
 from app.scheduler import Scheduler
 from app.schemas.types import EventType, NotificationType, SystemConfigKey
+from apscheduler.triggers.cron import CronTrigger
 
 from app.plugins import _PluginBase
 
@@ -77,6 +80,8 @@ class PluginClinic(_PluginBase):
     def __init__(self):
         super().__init__()
         self._enabled = False
+        self._scheduled_scan = False
+        self._cron = "0 2 * * *"
         self._notify = True
         self._exclude_pids = ""
 
@@ -86,6 +91,8 @@ class PluginClinic(_PluginBase):
         """
         if config:
             self._enabled = config.get("enabled", False)
+            self._scheduled_scan = config.get("scheduled_scan", False)
+            self._cron = config.get("cron") or "0 2 * * *"
             self._notify = config.get("notify", True)
             self._exclude_pids = (config.get("exclude_pids") or "").strip()
 
@@ -137,6 +144,42 @@ class PluginClinic(_PluginBase):
         """返回插件配置表单"""
         from .config_form import build_form
         return build_form()
+
+    def get_service(self) -> List[Dict[str, Any]]:
+        """
+        注册可选定时扫描服务。
+
+        这里只扫描并发送告警，绝不调用清理逻辑；清理必须由用户手动执行。
+        """
+        if self._enabled and self._scheduled_scan and self._cron:
+            return [
+                {
+                    "id": "pluginclinic_scan",
+                    "name": "插件诊所定时扫描",
+                    "trigger": CronTrigger.from_crontab(self._cron),
+                    "func": self._scheduled_scan_job,
+                    "kwargs": {},
+                }
+            ]
+        return []
+
+    def _scheduled_scan_job(self):
+        """定时扫描：发现异常只通知，不执行清理。"""
+        scan = self._scan()
+        counts = scan.get("counts", {})
+        abnormal_items = [
+            item for item in scan.get("items", [])
+            if item.get("status") in self.ABNORMAL_STATUSES
+        ]
+        if abnormal_items:
+            logger.warning(
+                "插件诊所定时扫描发现 %d 个异常/残留插件，未执行自动清理",
+                len(abnormal_items),
+            )
+            if self._notify:
+                self._notify_scan(scan)
+        else:
+            logger.info("插件诊所定时扫描完成：未发现异常或残留")
 
     def get_page(self) -> List[dict]:
         """
