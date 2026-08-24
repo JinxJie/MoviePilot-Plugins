@@ -114,8 +114,8 @@ def build_form() -> Tuple[List[dict], Dict[str, Any]]:
                 # ── 抽奖参数 ──
                 card("mdi-slot-machine", "success", "抽奖参数", [
                     row([
-                        col(4, textfield("interval", "⏱ 抽奖间隔（秒）", type="number", placeholder="8",
-                                         hint="基础间隔，被限流时自动退避（最高 30 秒）", persistent_hint=True)),
+                        col(4, textfield("interval", "⏱ 自适应模式兜底间隔（秒）", type="number", placeholder="8",
+                                         hint="正常抽奖按上一抽转盘时长自动排队；首次抽奖、未返回有效时长或接口异常时使用此值，默认 8 秒", persistent_hint=True)),
                         col(4, textfield("max_count", "🎲 每次抽多少抽", type="number", placeholder="0=不限制",
                                          hint="0 = 不限制（但受限于保留憨豆）", persistent_hint=True)),
                         col(4, textfield("reserve_beans", "💰 保留憨豆", type="number", placeholder="0",
