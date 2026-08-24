@@ -203,7 +203,7 @@ class NodeSeek(_PluginBase):
         last_note = "暂无记录"
         if records:
             last = records[-1]
-            last_status = "✅ 成功" if last.get("success") else ("ℹ️ 已签到" if last.get("already") else "❌ 失败")
+            last_status = "成功" if last.get("success") else ("已签到" if last.get("already") else "失败")
             last_status_color = "success" if last.get("success") else ("info" if last.get("already") else "error")
             last_note = f"{(last.get('date') or '—')} {(last.get('time') or '')}".strip()
         else:
@@ -218,7 +218,7 @@ class NodeSeek(_PluginBase):
             value_cls = f"text-h6 font-weight-bold text-{value_color}" if value_color else "text-h6 font-weight-bold"
             value_props = {
                 "class": value_cls,
-                "style": "font-size: clamp(0.8rem, 3.8vw, 1.25rem); white-space: nowrap; line-height: 1.2;",
+                "style": "font-size: clamp(0.78rem, 3.8vw, 1.25rem); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: normal; overflow-wrap: anywhere; line-height: 1.25;",
             }
             right = [
                 {"component": "span", "props": {"class": "text-caption text-medium-emphasis"}, "text": label},
@@ -227,7 +227,7 @@ class NodeSeek(_PluginBase):
                 ]},
             ]
             if note:
-                right.append({"component": "div", "props": {"class": "text-caption text-medium-emphasis"}, "text": note})
+                right.append({"component": "div", "props": {"class": "text-caption text-medium-emphasis", "style": "max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"}, "text": note})
             return {
                 "component": "VCard",
                 "props": {"variant": "flat", "elevation": 2, "class": "h-100 rounded-lg"},
