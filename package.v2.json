@@ -42,7 +42,7 @@
     "icon": "https://raw.githubusercontent.com/JinxJie/MoviePilot-Plugins/main/icons/pluginresidueclean.png",
     "author": "JinxJie",
     "level": 2,
-    "release": true,
+    "release": false,
     "history": {
       "v1.0.1": "增加风险分级、单插件清理、清理后复扫和更详细的清理结果",
       "v1.0.0": "首发版本：一键清理卸载残留、手动扫描、定时扫描通知、安全排除"
