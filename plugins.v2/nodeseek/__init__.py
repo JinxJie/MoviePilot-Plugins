@@ -314,7 +314,7 @@ class NodeSeek(_PluginBase):
                 "component": "VRow",
                 "content": [
                     {
-                        "component": "VCol", "props": {"cols": 12, "md": 6}, "content": [
+                        "component": "VCol", "props": {"cols": 12}, "content": [
                             {
                                 "component": "VCard", "props": {"variant": "flat", "elevation": 2, "class": "h-100 rounded-lg"}, "content": [
                                     {"component": "VCardItem", "props": {"class": "pb-1"}, "content": [
@@ -347,7 +347,7 @@ class NodeSeek(_PluginBase):
                         ]
                     },
                     {
-                        "component": "VCol", "props": {"cols": 12, "md": 6}, "content": [
+                        "component": "VCol", "props": {"cols": 12}, "content": [
                             {
                                 "component": "VCard", "props": {"variant": "flat", "elevation": 2, "class": "h-100 rounded-lg"}, "content": [
                                     {"component": "VCardItem", "props": {"class": "pb-1"}, "content": [
