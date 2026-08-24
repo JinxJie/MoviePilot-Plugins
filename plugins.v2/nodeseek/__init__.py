@@ -33,7 +33,7 @@ except Exception:
     HAS_CURL_CFFI = False
 
 
-class NodeSeekSign(_PluginBase):
+class NodeSeek(_PluginBase):
     """
     NodeSeek 论坛签到插件
     """
