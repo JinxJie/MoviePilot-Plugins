@@ -93,7 +93,7 @@ MoviePilot-Plugins/
 │   └── hhlottery.png
 ├── plugins/                    # V1 插件
 ├── plugins.v2/                 # V2 插件
-│   └── hhlottery/
+│   └── hhlottery/              # HHCLUB 自动抽奖
 ├── scripts/                    # 官方脚本
 ├── tests/                      # 官方测试
 ├── package.json                # V1 插件索引
