@@ -163,6 +163,10 @@ class PluginClinic(_PluginBase):
             ]
         return []
 
+    def stop_service(self):
+        """停止插件服务；定时服务由 MoviePilot 调度器统一移除。"""
+        pass
+
     def _scheduled_scan_job(self):
         """定时扫描：发现异常只通知，不执行清理。"""
         scan = self._scan()
