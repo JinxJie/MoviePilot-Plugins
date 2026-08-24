@@ -4,7 +4,7 @@
 功能：
 - 打开插件页面自动扫描所有插件状态
 - 定位无法加载的插件（缺依赖 / 代码错误 / 目录缺失）与卸载残留（目录 / 数据 / 配置 / 模块缓存）
-- 手动勾选清理，一键清理干净，让重新安装一路顺畅
+- 逐项确认清理，一键清理干净，让重新安装一路顺畅
 - 清理记录留痕，可回溯
 - 可选定时扫描：发现问题只发送通知，不自动清理
 
@@ -39,7 +39,7 @@ class PluginClinic(_PluginBase):
 
     # 插件元信息
     plugin_name = "插件诊所"
-    plugin_desc = "扫描无法加载的插件与卸载残留，勾选清理一键清干净，让重新安装一路顺畅"
+    plugin_desc = "扫描无法加载的插件与卸载残留，逐项确认或一键清理，让重新安装一路顺畅"
     plugin_icon = "https://raw.githubusercontent.com/JinxJie/MoviePilot-Plugins/main/icons/pluginclinic.png"
     plugin_version = "1.0.0"
     plugin_author = "JinxJie"
@@ -79,7 +79,6 @@ class PluginClinic(_PluginBase):
 
     def __init__(self):
         super().__init__()
-        self._enabled = False
         self._scheduled_scan = False
         self._cron = "0 2 * * *"
         self._notify = True
@@ -90,18 +89,17 @@ class PluginClinic(_PluginBase):
         初始化插件配置
         """
         if config:
-            self._enabled = config.get("enabled", False)
             self._scheduled_scan = config.get("scheduled_scan", False)
             self._cron = config.get("cron") or "0 2 * * *"
             self._notify = config.get("notify", True)
             self._exclude_pids = (config.get("exclude_pids") or "").strip()
 
     def get_state(self) -> bool:
-        """获取插件启用状态"""
-        return self._enabled
+        """仅在开启定时扫描时视为运行中；页面手动扫描/清理无需常驻运行。"""
+        return self._scheduled_scan
 
     def get_command(self) -> List[Dict[str, Any]]:
-        """注册命令（供消息平台调用）"""
+        """注册手动扫描命令。"""
         return [
             {
                 "cmd": "/pluginclinic",
@@ -151,7 +149,7 @@ class PluginClinic(_PluginBase):
 
         这里只扫描并发送告警，绝不调用清理逻辑；清理必须由用户手动执行。
         """
-        if self._enabled and self._scheduled_scan and self._cron:
+        if self._scheduled_scan and self._cron:
             return [
                 {
                     "id": "pluginclinic_scan",
@@ -224,30 +222,62 @@ class PluginClinic(_PluginBase):
                 ],
             }
 
-        # ---------- 扫描结果表 ----------
+        # ---------- 扫描结果与手动清理清单 ----------
+        # 页面操作使用 MoviePilot 已支持的 VBtn API 事件。每行一个清理按钮，
+        # 用户先阅读具体问题，再决定是否对该项执行，不依赖前端临时勾选状态。
+        api_base = f"plugin/{self.__class__.__name__}/clean?apikey={settings.API_TOKEN}"
+
+        def cell(text: Any, cls: str) -> dict:
+            return {"component": "td", "props": {"class": cls}, "text": str(text or "—")}
+
         def run_tr(cells: List[tuple], head: bool = False) -> dict:
             return {
                 "component": "tr",
                 "content": [
-                    {"component": "th" if head else "td", "props": {"class": cls}, "text": text}
+                    {
+                        "component": "th" if head else "td",
+                        "props": {"class": cls},
+                        "text": str(text or "—"),
+                    }
                     for text, cls in cells
                 ],
+            }
+
+        def clean_button(pid: str) -> dict:
+            return {
+                "component": "VBtn",
+                "props": {
+                    "color": "error",
+                    "size": "small",
+                    "variant": "tonal",
+                    "prepend-icon": "mdi-delete-outline",
+                },
+                "text": "清理此项",
+                "events": {
+                    "click": {
+                        "api": api_base,
+                        "method": "post",
+                        "params": {"pid": pid, "scope": "selected"},
+                    }
+                },
             }
 
         scan_table = {
             "component": "VTable",
             "props": {"hover": True, "density": "compact", "class": "clinic-scan-table"},
             "content": [
-                {"component": "thead", "content": [run_tr([
-                    ("插件", "text-body-2 text-start ps-3 text-no-wrap"),
-                    ("状态", "text-body-2 text-center text-no-wrap"),
-                    ("问题详情", "text-body-2 text-start"),
-                    ("残留项", "text-body-2 text-start"),
-                ], head=True)]},
+                {"component": "thead", "content": [{"component": "tr", "content": [
+                    {"component": "th", "props": {"class": "text-body-2 text-start ps-3 text-no-wrap"}, "text": "插件"},
+                    {"component": "th", "props": {"class": "text-body-2 text-center text-no-wrap"}, "text": "状态"},
+                    {"component": "th", "props": {"class": "text-body-2 text-start"}, "text": "问题详情"},
+                    {"component": "th", "props": {"class": "text-body-2 text-start"}, "text": "残留项"},
+                    {"component": "th", "props": {"class": "text-body-2 text-center text-no-wrap"}, "text": "操作"},
+                ]}]},
                 {"component": "tbody", "content": []},
             ],
         }
 
+        cleanable_items = []
         for it in items:
             st = it.get("status", "")
             label = self.STATUS_LABEL.get(st, st)
@@ -256,12 +286,30 @@ class PluginClinic(_PluginBase):
             if st == self.STATUS_OK:
                 issue = "运行正常"
             leftovers = it.get("leftovers") or []
-            scan_table["content"][1]["content"].append(run_tr([
-                (it.get("pid", "—"), "text-body-2 text-start ps-3 text-no-wrap font-weight-bold"),
-                (label, f"text-body-2 font-weight-bold text-center text-no-wrap text-{color}"),
-                (issue[:60], "text-body-2 text-start text-medium-emphasis"),
-                ("、".join(leftovers) if leftovers else "—", "text-body-2 text-start text-medium-emphasis"),
-            ]))
+            can_clean = (
+                st in self.ABNORMAL_STATUSES
+                and not it.get("is_self")
+                and not it.get("excluded")
+            )
+            if can_clean:
+                cleanable_items.append(it)
+            elif it.get("is_self"):
+                action = "自身受保护"
+            elif it.get("excluded"):
+                action = "排除列表保护"
+            else:
+                action = "无需清理"
+            row_cells = [
+                cell(it.get("pid", "—"), "text-body-2 text-start ps-3 text-no-wrap font-weight-bold"),
+                cell(label, f"text-body-2 font-weight-bold text-center text-no-wrap text-{color}"),
+                cell(issue[:120], "text-body-2 text-start text-medium-emphasis"),
+                cell("、".join(leftovers) if leftovers else "—", "text-body-2 text-start text-medium-emphasis"),
+            ]
+            if can_clean:
+                row_cells.append({"component": "td", "props": {"class": "text-center text-no-wrap"}, "content": [clean_button(it["pid"])]})
+            else:
+                row_cells.append(cell(action, "text-body-2 text-center text-medium-emphasis text-no-wrap"))
+            scan_table["content"][1]["content"].append({"component": "tr", "content": row_cells})
 
         # ---------- 清理记录表 ----------
         rec_table = {
@@ -319,7 +367,26 @@ class PluginClinic(_PluginBase):
                         "component": "VCol", "props": {"cols": 12}, "content": [
                             {
                                 "component": "VCard", "props": {"variant": "tonal", "color": "warning"}, "content": [
-                                    {"component": "VCardTitle", "text": "🔍 扫描结果（打开页面自动扫描）"},
+                                    {"component": "VCardTitle", "props": {"class": "d-flex align-center justify-space-between flex-wrap ga-2"}, "content": [
+                                        {"component": "span", "text": f"🔍 待清理清单（自动扫描：{len(cleanable_items)} 项可处理）"},
+                                        {
+                                            "component": "VBtn",
+                                            "props": {
+                                                "color": "error",
+                                                "size": "small",
+                                                "variant": "tonal",
+                                                "prepend-icon": "mdi-delete-sweep-outline",
+                                                "disabled": not bool(cleanable_items),
+                                            },
+                                            "text": "一键清理全部异常",
+                                            "events": {"click": {
+                                                "api": api_base,
+                                                "method": "post",
+                                                "params": {"scope": "all"},
+                                            }},
+                                        },
+                                    ]},
+                                    {"component": "VCardSubtitle", "props": {"class": "px-4 pb-2"}, "text": "每项均展示问题详情；点击「清理此项」即代表你已确认执行不可逆清理。受保护或排除项不会显示清理按钮。"},
                                     {"component": "VCardText", "props": {"class": "pa-2"}, "content": [scan_table]},
                                 ]
                             }
@@ -334,17 +401,17 @@ class PluginClinic(_PluginBase):
                         "component": "VCol", "props": {"cols": 12}, "content": [
                             {
                                 "component": "VCard", "props": {"variant": "tonal", "color": "info"}, "content": [
-                                    {"component": "VCardTitle", "text": "⚙️ 清理操作"},
+                                    {"component": "VCardTitle", "text": "🧹 手动清理说明"},
                                     {"component": "VCardText", "content": [
                                         {"component": "div", "props": {"class": "text-body-2"}, "content": [
                                             {"component": "p", "props": {"class": "mb-1"},
-                                             "text": "1️⃣ 在下方「待清理清单」中勾选要清理的插件；"},
+                                             "text": "• 每个异常/残留插件右侧都有「清理此项」按钮：适合逐项确认后处理。"},
                                             {"component": "p", "props": {"class": "mb-1"},
-                                             "text": "2️⃣ 点击「清理所选」执行，或「一键清理」清掉全部异常与残留插件；"},
+                                             "text": "• 「一键清理全部异常」只处理待清理清单中的异常与残留；正常、插件诊所自身和排除列表中的插件始终不会被清理。"},
                                             {"component": "p", "props": {"class": "mb-1"},
-                                             "text": "3️⃣ 插件诊所自身与「排除列表」中的插件不会被清理；"},
+                                             "text": "• 清理会删除插件目录、数据、配置和安装记录，操作不可逆；执行后刷新或重新打开页面查看结果。"},
                                             {"component": "p", "props": {"class": "mb-1"},
-                                             "text": "4️⃣ 也可通过命令 /pluginclinic 或 API POST /api/v1/plugin/pluginclinic/clean 触发清理。"},
+                                             "text": "• 打开插件页面会自动扫描；只有开启「定时扫描」后才会注册后台扫描任务。"},
                                         ]},
                                     ]},
                                 ]
@@ -709,7 +776,7 @@ class PluginClinic(_PluginBase):
     # ======================== API 端点 ========================
 
     def _api_scan(self, *args, **kwargs) -> dict:
-        """API：扫描插件状态"""
+        """API：手动扫描插件状态。"""
         scan = self._scan()
         if self._notify:
             self._notify_scan(scan)
@@ -720,11 +787,27 @@ class PluginClinic(_PluginBase):
         }
 
     def _api_clean(self, *args, **kwargs) -> dict:
-        """API：清理插件"""
+        """
+        API：执行已由用户点击确认的清理。
+
+        兼容页面 VBtn 的 params（pid/scope 直接作为关键字参数）和外部 API
+        的 JSON body（data.pids / data.scope）两种调用方式。
+        """
         data = kwargs.get("data") or {}
-        pids = data.get("pids") or []
-        scope = data.get("scope") or "selected"
-        return self._clean(pids=pids, scope=scope)
+        if not isinstance(data, dict):
+            data = {}
+        scope = kwargs.get("scope") or data.get("scope") or "selected"
+        pid = kwargs.get("pid") or data.get("pid")
+        pids = kwargs.get("pids") or data.get("pids") or []
+        if pid:
+            pids = [pid]
+        if isinstance(pids, str):
+            pids = [pids]
+        if scope not in ("selected", "all"):
+            return {"code": 0, "message": "无效清理范围", "data": []}
+        if scope == "selected" and not pids:
+            return {"code": 0, "message": "请先选择要清理的插件", "data": []}
+        return self._clean(pids=list(pids), scope=scope)
 
     def _api_records(self, *args, **kwargs) -> dict:
         """API：获取清理记录"""

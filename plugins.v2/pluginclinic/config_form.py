@@ -16,19 +16,7 @@ def build_form() -> Tuple[List[dict], Dict[str, Any]]:
                     "content": [
                         {
                             "component": "VCol",
-                            "props": {"cols": 12, "md": 4},
-                            "content": [{
-                                "component": "VSwitch",
-                                "props": {
-                                    "model": "enabled",
-                                    "label": "启用插件",
-                                    "hint": "开启后可使用扫描、清理、命令和 API",
-                                },
-                            }],
-                        },
-                        {
-                            "component": "VCol",
-                            "props": {"cols": 12, "md": 4},
+                            "props": {"cols": 12, "md": 6},
                             "content": [{
                                 "component": "VSwitch",
                                 "props": {
@@ -40,7 +28,7 @@ def build_form() -> Tuple[List[dict], Dict[str, Any]]:
                         },
                         {
                             "component": "VCol",
-                            "props": {"cols": 12, "md": 4},
+                            "props": {"cols": 12, "md": 6},
                             "content": [{
                                 "component": "VSwitch",
                                 "props": {
@@ -103,7 +91,6 @@ def build_form() -> Tuple[List[dict], Dict[str, Any]]:
             ],
         },
     ], {
-        "enabled": False,
         "scheduled_scan": False,
         "cron": "0 2 * * *",
         "notify": True,
