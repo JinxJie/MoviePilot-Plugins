@@ -37,7 +37,7 @@ class PluginResidueClean(_PluginBase):
     plugin_name = "插件残留清理"
     plugin_desc = "一键清理卸载后的插件残留（目录/数据/配置/模块缓存），支持定时扫描通知，不自动清理"
     plugin_icon = "https://raw.githubusercontent.com/JinxJie/MoviePilot-Plugins/main/icons/pluginresidueclean.png"
-    plugin_version = "1.0.0"
+    plugin_version = "1.0.1"
     plugin_author = "JinxJie"
     author_url = "https://github.com/JinxJie"
     plugin_config_prefix = "pluginresidueclean_"
@@ -98,6 +98,13 @@ class PluginResidueClean(_PluginBase):
                 "summary": "扫描插件残留",
                 "description": "扫描卸载后仍有残留的插件（目录/数据/配置/模块缓存/文件夹配置）",
                 "endpoint": self.api_scan,
+                "methods": ["POST"],
+            },
+            {
+                "path": "/clean_one",
+                "summary": "清理单个插件残留",
+                "description": "仅清理指定的已卸载插件残留，自动保护自身、已安装插件和排除列表",
+                "endpoint": self.api_clean_one,
                 "methods": ["POST"],
             },
             {
@@ -202,6 +209,8 @@ class PluginResidueClean(_PluginBase):
             if lp in exclude:
                 continue
             leftovers = []
+            risk = "low"
+            risk_score = 0
             # 目录残留
             if (plugins_dir / pid).exists() or (plugins_dir / lp).exists():
                 leftovers.append("目录")
@@ -230,10 +239,14 @@ class PluginResidueClean(_PluginBase):
 
             if not leftovers:
                 continue
+            risk_score = sum({"目录": 3, "数据": 2, "配置": 2, "模块缓存": 1, "文件夹配置": 1}.get(x, 1) for x in leftovers)
+            risk = "high" if risk_score >= 3 else ("medium" if risk_score >= 2 else "low")
             status = self.STATUS_INSTALLED if lp in installed else self.STATUS_LEFT
             items.append({
                 "pid": pid,
                 "status": status,
+                "risk": risk,
+                "risk_score": risk_score,
                 "leftovers": leftovers,
             })
 
@@ -259,8 +272,8 @@ class PluginResidueClean(_PluginBase):
         finally:
             self._clean_lock.release()
 
-    def _clean_locked(self) -> dict:
-        """实际清理实现；由 _clean 串行保护。"""
+    def _clean_locked(self, targets: Optional[List[dict]] = None) -> dict:
+        """实际清理实现；由调用方持有清理锁。"""
         try:
             installed = SystemConfigOper().get(SystemConfigKey.UserInstalledPlugins) or []
             folders = SystemConfigOper().get(SystemConfigKey.PluginFolders) or {}
@@ -270,7 +283,7 @@ class PluginResidueClean(_PluginBase):
             return {"code": 0, "success": False, "message": f"初始化失败：{e}", "data": []}
 
         pm = PluginManager()
-        targets = [it for it in self._scan().get("leftovers", []) if it["pid"]]
+        targets = targets if targets is not None else [it for it in self._scan().get("leftovers", []) if it["pid"]]
         total = len(targets)
         self._set_progress(True, 0, total, "准备开始", "")
         logger.info("插件残留清理：共发现 %d 个可清理残留", total)
@@ -337,7 +350,9 @@ class PluginResidueClean(_PluginBase):
 
         cleaned = sum(1 for r in results if r["success"])
         failed = len(results) - cleaned
-        message = f"清理完成：成功 {cleaned} 个，失败 {failed} 个"
+        post_scan = self._scan()
+        remaining = len(post_scan.get("leftovers", []))
+        message = f"清理完成：成功 {cleaned} 个，失败 {failed} 个，复扫后仍有 {remaining} 个残留"
         logger.info(f"插件残留清理：{message}")
         self._set_progress(False, total, total, message, "")
 
@@ -418,6 +433,32 @@ class PluginResidueClean(_PluginBase):
             logger.error(f"插件残留清理扫描失败：{e}")
             return {"success": False, "code": 0, "message": f"扫描失败：{e}", "data": {}}
 
+    def api_clean_one(self, pid: str = "", data: Optional[Dict[str, Any]] = Body(default=None)) -> dict:
+        """API：清理单个已卸载插件；PID 必须来自当前扫描结果。"""
+        body = data if isinstance(data, dict) else {}
+        target = (pid or body.get("pid") or "").strip()
+        if not target:
+            return {"success": False, "code": 0, "message": "缺少插件 ID", "data": {}}
+        scan = self._scan()
+        item = next((it for it in scan.get("leftovers", []) if it.get("pid", "").lower() == target.lower()), None)
+        if not item:
+            return {"success": False, "code": 0, "message": "目标不存在、已安装或受到保护", "data": {"pid": target}}
+        if self._clean_lock.locked():
+            return {"success": False, "code": 0, "message": "已有清理任务正在运行", "data": {}}
+        # 复用统一清理逻辑的筛选入口，避免单项清理绕过安全判断。
+        threading.Thread(target=self._clean_targets, args=([item],), name="pluginresidueclean-one", daemon=True).start()
+        return {"success": True, "code": 1, "message": f"已启动 {target} 的清理任务", "data": item}
+
+    def _clean_targets(self, targets: List[dict]) -> dict:
+        """清理指定目标并复扫；单项入口与批量入口共用锁。"""
+        if not self._clean_lock.acquire(blocking=False):
+            return {"success": False, "code": 0, "message": "已有清理任务正在运行", "data": []}
+        try:
+            # 仅将目标传入通用批量清理实现的轻量包装，当前方法不接受外部任意路径。
+            return self._clean_locked(targets=targets)
+        finally:
+            self._clean_lock.release()
+
     def api_clean(self, scope: str = "all", data: Optional[Dict[str, Any]] = Body(default=None)) -> dict:
         """
         API：一键清理卸载残留。
@@ -470,6 +511,11 @@ class PluginResidueClean(_PluginBase):
         progress_api = f"plugin/{self.__class__.__name__}/progress?apikey={settings.API_TOKEN}"
         clean_api = f"plugin/{self.__class__.__name__}/clean?apikey={settings.API_TOKEN}&scope=all"
 
+        clean_one_api = lambda pid: f"plugin/{self.__class__.__name__}/clean_one?apikey={settings.API_TOKEN}&pid={pid}"
+
+        def risk_view(it: dict) -> tuple[str, str]:
+            return {"high": ("高", "text-error"), "medium": ("中", "text-warning"), "low": ("低", "text-info")}.get(it.get("risk", "low"), ("低", "text-info"))
+
         def cell(text: Any, cls: str) -> dict:
             return {"component": "td", "props": {"class": cls}, "text": str(text or "—")}
 
@@ -481,21 +527,24 @@ class PluginResidueClean(_PluginBase):
                 {"component": "thead", "content": [{"component": "tr", "content": [
                     {"component": "th", "props": {"class": "text-body-2 text-start ps-3 text-no-wrap"}, "text": "插件"},
                     {"component": "th", "props": {"class": "text-body-2 text-start"}, "text": "残留项"},
+                    {"component": "th", "props": {"class": "text-body-2 text-center text-no-wrap"}, "text": "风险"},
                     {"component": "th", "props": {"class": "text-body-2 text-center text-no-wrap"}, "text": "状态"},
+                    {"component": "th", "props": {"class": "text-body-2 text-center text-no-wrap"}, "text": "操作"},
                 ]}]},
                 {"component": "tbody", "content": []},
             ],
         }
 
         for it in items:
-            if it["status"] == self.STATUS_LEFT:
-                status = ("✅ 可清理", "text-success")
-            else:
-                status = ("ℹ️ 已安装", "text-medium-emphasis")
+            risk_text, risk_cls = risk_view(it)
+            status_text, status_cls = (("可清理", "text-success") if it["status"] == self.STATUS_LEFT else ("已安装，仅展示", "text-medium-emphasis"))
+            action = {"component": "VBtn", "props": {"size": "x-small", "variant": "text", "color": "error", "disabled": it["status"] != self.STATUS_LEFT}, "text": "清理", "events": {"click": {"api": clean_one_api(it["pid"]), "method": "post", "params": {"pid": it["pid"]}}}}
             table["content"][1]["content"].append({"component": "tr", "content": [
                 cell(it["pid"], "text-body-2 text-start ps-3 text-no-wrap font-weight-bold"),
                 cell("、".join(it["leftovers"]), "text-body-2 text-start text-medium-emphasis"),
-                cell(status[0], f"text-body-2 font-weight-bold text-center text-no-wrap {status[1]}"),
+                cell(risk_text, f"text-body-2 font-weight-bold text-center text-no-wrap {risk_cls}"),
+                cell(status_text, f"text-body-2 font-weight-bold text-center text-no-wrap {status_cls}"),
+                {"component": "td", "props": {"class": "text-center"}, "content": [action]},
             ]})
 
         page = [

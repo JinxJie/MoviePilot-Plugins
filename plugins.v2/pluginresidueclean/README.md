@@ -14,6 +14,13 @@
 - **定时扫描通知**：可选定时扫描，发现残留只发通知，**绝不自动清理**
 - **安全保护**：插件自身与「排除列表」中的插件始终不会被清理
 
+## v1.0.1
+
+- 增加残留风险分级
+- 支持单插件清理
+- 清理完成后自动复扫
+- 增加清理结果与失败信息
+
 ## 使用
 
 1. 安装插件后打开「插件残留清理」页面，即可看到当前残留情况
@@ -30,3 +37,4 @@
 - API：
   - `POST /api/v1/plugin/PluginResidueClean/scan` 扫描
   - `POST /api/v1/plugin/PluginResidueClean/clean` 一键清理
+  - `POST /api/v1/plugin/PluginResidueClean/clean_one` 清理单个插件残留

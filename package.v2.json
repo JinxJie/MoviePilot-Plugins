@@ -38,12 +38,13 @@
     "name": "插件残留清理",
     "description": "一键清理卸载后的插件残留（目录/数据/配置/模块缓存），支持定时扫描通知，不自动清理。",
     "labels": "插件,清理",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "icon": "https://raw.githubusercontent.com/JinxJie/MoviePilot-Plugins/main/icons/pluginresidueclean.png",
     "author": "JinxJie",
     "level": 2,
     "release": true,
     "history": {
+      "v1.0.1": "增加风险分级、单插件清理、清理后复扫和更详细的清理结果",
       "v1.0.0": "首发版本：一键清理卸载残留、手动扫描、定时扫描通知、安全排除"
     }
   }
