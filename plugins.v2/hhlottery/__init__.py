@@ -887,6 +887,7 @@ class HHLottery(_PluginBase):
                 return tags
 
             draw_count = 0
+            previous_draw_sent_at = None
 
             # 2. 抽奖循环
             while True:
@@ -991,7 +992,14 @@ class HHLottery(_PluginBase):
                 prize_text = data.get("prize_text", "")
                 prize_type, prize_name, prize_value = self._parse_prize(prize_text)
 
-                logger.info(f"🎰 第 {draw_count} 抽：{prize_name}（{prize_text}）")
+                # 记录请求实际发出间隔；第一抽没有上一抽，单独标记为首次
+                if draw_count > 1 and previous_draw_sent_at is not None:
+                    real_interval = draw_sent_at - previous_draw_sent_at
+                    interval_text = f"（{real_interval:.1f}s）"
+                else:
+                    interval_text = "（首次）"
+                logger.info(f"🎰 第 {draw_count} 抽{interval_text}：{prize_name}（{prize_text}）")
+                previous_draw_sent_at = draw_sent_at
 
                 # 更新统计
                 round_stats["count"] += 1
