@@ -149,6 +149,8 @@ class HHLottery(_PluginBase):
     # 运行状态
     _running: bool = False
     _stop_requested: bool = False
+    # 手动停止时仍需发送本轮结束通知；普通配置接管退出则不通知旧任务
+    _notify_on_stop: bool = False
     _config_seq: int = 0
     _active_seq: int = 0
     _save_id: str = ""
@@ -207,6 +209,7 @@ class HHLottery(_PluginBase):
 
             # 停止开关：只停不启
             if self._stop_current:
+                self._notify_on_stop = True
                 logger.info(f"🛑 stop_current 触发：停止当前抽奖并清除启动指令（version={self._current_save_version}）")
                 self._stop_current = False
                 self.update_config({
@@ -799,6 +802,7 @@ class HHLottery(_PluginBase):
 
         self._running = True
         self._stop_requested = False
+        self._notify_on_stop = False
         active_seq = self._active_seq = self._config_seq
         logger.info(f"🎰 HHCLUB 自动抽奖任务开始（配置序号 {active_seq}）")
         logger.info(f"🔐 当前活跃序号={self._active_seq}，最新配置序号={self._config_seq}")
@@ -1089,9 +1093,12 @@ class HHLottery(_PluginBase):
 
             # 3.1 抽奖结束后再校准一次最新余额
             if self._active_seq != self._config_seq:
-                stop_reason = f"检测到更新的配置，停止保存旧任务结果（活跃={self._active_seq}，最新={self._config_seq}）"
-                logger.info(f"♻️ {stop_reason}")
-                return
+                if not self._notify_on_stop:
+                    stop_reason = f"检测到更新的配置，停止保存旧任务结果（活跃={self._active_seq}，最新={self._config_seq}）"
+                    logger.info(f"♻️ {stop_reason}")
+                    return
+                stop_reason = "用户手动停止抽奖"
+                logger.info("🛑 用户手动停止抽奖，继续保存已完成统计并发送结束通知")
             final_balance, _ = self._fetch_balance()
             if final_balance is not None:
                 logger.info(f"💰 抽奖结束最新余额校准：{final_balance:,}（保存前原余额 {balance:,}）")
@@ -1832,6 +1839,7 @@ class HHLottery(_PluginBase):
         API: 手动停止抽奖
         """
         self._stop_requested = True
+        self._notify_on_stop = True
         self._config_seq += 1
         logger.info(f"🛑 服务停止请求已发送，配置序号推进到 {self._config_seq}，等待抽奖线程退出")
         logger.info(f"🛑 收到手动停止请求，配置序号推进到 {self._config_seq}，version={self._current_save_version!r}")
