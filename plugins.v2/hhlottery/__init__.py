@@ -928,7 +928,12 @@ class HHLottery(_PluginBase):
                     elapsed_ms = (time.monotonic() - self._last_draw_sent_at) * 1000
                     wait_ms = max(0, self._last_duration_ms - elapsed_ms)
                 else:
-                    wait_ms = max(0, current_interval * 1000)
+                    fallback_ms = max(0, current_interval * 1000)
+                    if self._last_draw_sent_at:
+                        elapsed_ms = (time.monotonic() - self._last_draw_sent_at) * 1000
+                        wait_ms = max(0, fallback_ms - elapsed_ms)
+                    else:
+                        wait_ms = fallback_ms
                 if wait_ms > 0:
                     time.sleep(wait_ms / 1000)
 
@@ -1171,7 +1176,8 @@ class HHLottery(_PluginBase):
         if self._last_duration_ms:
             logger.info(f"⏱️ 自适应冷却：{self._last_duration_ms}ms（从请求发出时计时）")
         else:
-            logger.info(f"⏱️ 未返回有效 duration，下一抽使用兜底间隔 {self._interval} 秒")
+            # duration 缺失时静默回退到配置间隔，避免每一抽刷屏
+            pass
 
     def _do_draw(self) -> Optional[dict]:
         """
