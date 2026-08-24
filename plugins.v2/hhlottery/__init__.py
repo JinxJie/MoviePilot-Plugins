@@ -1165,8 +1165,8 @@ class HHLottery(_PluginBase):
 
     def _update_duration(self, data: dict, sent_at: float) -> None:
         """保存站点返回的下一抽冷却时长；异常值回退到固定间隔。"""
-        payload = data.get("data") if isinstance(data, dict) else None
-        raw = payload.get("duration") if isinstance(payload, dict) else None
+        # 调用方已传入响应内层 data：{duration, prize_text, ...}
+        raw = data.get("duration") if isinstance(data, dict) else None
         try:
             duration = int(float(raw))
         except (TypeError, ValueError):
