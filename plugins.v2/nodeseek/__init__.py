@@ -14,12 +14,13 @@ NodeSeek 使用 Cloudflare 防护，纯 requests 的 TLS 指纹会被拦截（40
 
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.core.config import settings
 from app.log import logger
 from app.schemas.types import EventType, NotificationType
+from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from app.plugins import _PluginBase
@@ -83,10 +84,10 @@ class NodeSeekSign(_PluginBase):
     def __init__(self):
         super().__init__()
         self._enabled = False
+        self._onlyonce = False
         self._cookie = ""
         self._cron = "30 0 * * *"          # 默认每天 00:30（刷新后可抢前排排名）
-        self._notify_success = True
-        self._notify_fail = True
+        self._notify = True
         self._use_proxy = False
         self._running = False
 
@@ -96,33 +97,53 @@ class NodeSeekSign(_PluginBase):
         """
         if config:
             self._enabled = config.get("enabled", False)
+            self._onlyonce = config.get("onlyonce", False)
             self._cookie = (config.get("cookie") or "").strip()
             self._cron = config.get("cron") or "30 0 * * *"
-            self._notify_success = config.get("notify_success", True)
-            self._notify_fail = config.get("notify_fail", True)
+            self._notify = config.get("notify", True)
             self._use_proxy = config.get("use_proxy", False)
 
-            # 注册定时服务
-            self.update_service(
-                {
-                    "nodeseek_sign": {
-                        "name": "NodeSeek 每日签到",
-                        "trigger": CronTrigger.from_crontab(self._cron),
-                        "func": self._sign_job,
-                        "kwargs": {},
-                    }
-                }
+        # 立即运行一次（一次性开关，运行后自动复位）
+        if self._onlyonce:
+            scheduler = BackgroundScheduler(timezone=settings.TZ)
+            logger.info("NodeSeek 自动签到：立即运行一次")
+            scheduler.add_job(
+                func=self._do_sign,
+                trigger="date",
+                run_date=datetime.now() + timedelta(seconds=3),
+                name="NodeSeek 立即签到",
+                kwargs={"source": "once"},
             )
+            scheduler.start()
+            # 关闭一次性开关
+            self._onlyonce = False
+            self.__update_config()
 
         if not HAS_CURL_CFFI:
             logger.warning(
-                "NodeSeek 签到：未检测到 curl_cffi，将回退 requests 发送请求，"
+                "NodeSeek 自动签到：未检测到 curl_cffi，将回退 requests 发送请求，"
                 "可能被 Cloudflare 拦截（403），建议安装 curl_cffi"
             )
 
+    def __update_config(self):
+        """保存配置（用于一次性开关自动复位）"""
+        try:
+            self.update_config(
+                {
+                    "enabled": self._enabled,
+                    "onlyonce": self._onlyonce,
+                    "cookie": self._cookie,
+                    "cron": self._cron,
+                    "notify": self._notify,
+                    "use_proxy": self._use_proxy,
+                }
+            )
+        except Exception as e:
+            logger.error(f"保存配置失败：{e}")
+
     def get_state(self) -> bool:
         """获取插件启用状态"""
-        return self._enabled and bool(self._cookie)
+        return self._enabled
 
     # ======================== 命令 / API ========================
 
@@ -543,9 +564,9 @@ class NodeSeekSign(_PluginBase):
 
     def _notify_result(self, result: dict, date: str, clock: str):
         """按结果类型发送通知"""
+        if not self._notify:
+            return
         if result["success"]:
-            if not self._notify_success:
-                return
             gain = int(result.get("gain", 0) or 0)
             current = int(result.get("current", 0) or 0)
             lines = [
@@ -557,14 +578,10 @@ class NodeSeekSign(_PluginBase):
                 lines.append(f"💰 当前 {current:,} 鸡腿")
             self._send_notification(self._format_notification("NodeSeek 自动签到", "\n".join(lines)))
         elif result["already"]:
-            if not self._notify_success:
-                return
             self._send_notification(self._format_notification(
                 "NodeSeek 自动签到", "ℹ️ 今日已签到过，明天再来\n\n💬 " + (result.get("message") or "已完成签到")
             ))
         else:
-            if not self._notify_fail:
-                return
             if result["cookie_invalid"]:
                 body = "⚠️ Cookie 已失效（USER NOT FOUND）\n\n请重新获取 Cookie 后更新插件配置"
             else:
