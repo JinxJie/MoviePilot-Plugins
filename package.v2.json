@@ -24,12 +24,13 @@
     "name": "NodeSeek 自动签到",
     "description": "NodeSeek 论坛每日自动签到，使用 curl_cffi 模拟 Chrome 指纹绕过 Cloudflare，支持鸡腿收益统计、签到记录与消息通知。",
     "labels": "签到,自动化,论坛",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "icon": "https://raw.githubusercontent.com/JinxJie/MoviePilot-Plugins/main/icons/nodeseek.png",
     "author": "JinxJie",
     "level": 2,
     "release": false,
     "history": {
+      "v1.0.1": "优化移动端状态卡片与签到记录布局，修复已签到状态显示和窄屏溢出",
       "v1.0.0": "首发版本：每日定时自动签到、curl_cffi 过 Cloudflare、鸡腿收益统计、签到历史、消息通知、手动签到命令与 API"
     }
   },
