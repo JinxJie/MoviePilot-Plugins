@@ -10,6 +10,21 @@ JinxJie 的 [MoviePilot](https://github.com/jxxghp/MoviePilot) 第三方插件�
 |------|------|------|------|
 | HHCLUB 自动抽奖 | [`plugins.v2/hhlottery`](plugins.v2/hhlottery) | 1.0.8 | HHCLUB 自动抽奖增强版，支持定时抽奖、手动停止、最新配置接管、大奖通知、今日/历史汇总。若你也在使用油猴脚本，可使用 [HHCLUB 自动抽奖 · 庆典版](https://greasyfork.org/zh-CN/scripts/591722)。 |
 
+## 📖 使用说明
+
+**1. 添加仓库地址**
+
+在 MoviePilot 「插件管理」中添加仓库地址：
+```
+https://github.com/JinxJie/MoviePilot-Plugins
+```
+
+**2. 安装与配置**
+
+- 在 MoviePilot 中安装插件。
+- 根据插件说明配置相关参数。
+- 启用插件并设置定时任务（如需要）。
+
 ## 🧩 插件详情
 
 点击插件名展开查看功能与更新历史。
@@ -61,21 +76,6 @@ JinxJie 的 [MoviePilot](https://github.com/jxxghp/MoviePilot) 第三方插件�
 - v1.0.0：初始版本，支持自动抽奖、余额追踪、大奖通知、站内信清理和 Cron 定时运行。
 
 </details>
-
-## 📖 使用说明
-
-**1. 添加仓库地址**
-
-在 MoviePilot 「插件管理」中添加仓库地址：
-```
-https://github.com/JinxJie/MoviePilot-Plugins
-```
-
-**2. 安装与配置**
-
-- 在 MoviePilot 中安装插件。
-- 根据插件说明配置相关参数。
-- 启用插件并设置定时任务（如需要）。
 
 ## ⚠️ 注意事项
 
