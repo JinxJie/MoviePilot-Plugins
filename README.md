@@ -62,11 +62,27 @@ JinxJie 的 [MoviePilot](https://github.com/jxxghp/MoviePilot) 第三方插件�
 
 </details>
 
+## 📖 使用说明
+
+**1. 添加仓库地址**
 
 在 MoviePilot 「插件管理」中添加仓库地址：
 ```
 https://github.com/JinxJie/MoviePilot-Plugins
 ```
+
+**2. 安装与配置**
+
+- 在 MoviePilot 中安装插件。
+- 根据插件说明配置相关参数。
+- 启用插件并设置定时任务（如需要）。
+
+## ⚠️ 注意事项
+
+- 本插件库中的插件均为个人维护，使用前请仔细阅读说明。
+- 部分插件需要特定权限或配置才能正常使用。
+- 如遇到问题，请先查看插件说明或提交 Issue。
+- 建议定期更新插件以获取最新功能和修复。
 
 ## 目录结构
 
