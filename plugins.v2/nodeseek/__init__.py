@@ -12,6 +12,7 @@ NodeSeek 使用 Cloudflare 防护，纯 requests 的 TLS 指纹会被拦截（40
 本插件优先使用 curl_cffi 的浏览器指纹模拟，未安装时回退 requests 并提示。
 """
 
+import random
 import re
 import time
 from datetime import datetime, timedelta
@@ -24,6 +25,12 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from app.plugins import _PluginBase
+
+try:
+    from .yescaptcha import YesCaptchaSolver, YesCaptchaSolverError
+except Exception:
+    YesCaptchaSolver = None
+    YesCaptchaSolverError = Exception
 
 try:
     from curl_cffi import requests as curl_requests
@@ -89,6 +96,14 @@ class NodeSeek(_PluginBase):
         self._cron = "30 0 * * *"          # 默认每天 00:30（刷新后可抢前排排名）
         self._notify = True
         self._use_proxy = False
+        self._ns_random = False
+        self._random_delay = 0
+        self._cookie_first = True
+        self._accounts = ""
+        self._solver_type = "yescaptcha"
+        self._client_key = ""
+        self._api_base_url = ""
+        self._auto_save_cookie = True
         self._running = False
 
     def init_plugin(self, config: dict = None):
@@ -102,6 +117,14 @@ class NodeSeek(_PluginBase):
             self._cron = config.get("cron") or "30 0 * * *"
             self._notify = config.get("notify", True)
             self._use_proxy = config.get("use_proxy", False)
+            self._ns_random = config.get("ns_random", False)
+            self._random_delay = max(0, int(config.get("random_delay", 0) or 0))
+            self._cookie_first = config.get("cookie_first", True)
+            self._accounts = (config.get("accounts") or "").strip()
+            self._solver_type = (config.get("solver_type") or "yescaptcha").strip().lower()
+            self._client_key = (config.get("client_key") or "").strip()
+            self._api_base_url = (config.get("api_base_url") or "").strip()
+            self._auto_save_cookie = config.get("auto_save_cookie", True)
 
         # 立即运行一次（一次性开关，运行后自动复位）
         if self._onlyonce:
@@ -136,6 +159,14 @@ class NodeSeek(_PluginBase):
                     "cron": self._cron,
                     "notify": self._notify,
                     "use_proxy": self._use_proxy,
+                    "ns_random": self._ns_random,
+                    "random_delay": self._random_delay,
+                    "cookie_first": self._cookie_first,
+                    "accounts": self._accounts,
+                    "solver_type": self._solver_type,
+                    "client_key": self._client_key,
+                    "api_base_url": self._api_base_url,
+                    "auto_save_cookie": self._auto_save_cookie,
                 }
             )
         except Exception as e:
@@ -383,10 +414,15 @@ class NodeSeek(_PluginBase):
     # ======================== 核心逻辑 ========================
 
     def _sign_job(self):
-        """定时签到任务入口"""
+        """定时签到任务入口，先随机等待 0~N 分钟。"""
         if self._running:
             logger.warning("NodeSeek 签到任务正在运行，跳过本次")
             return
+        if self._random_delay > 0:
+            delay = random.randint(0, self._random_delay * 60)
+            if delay:
+                logger.info("NodeSeek 签到：定时触发后随机延迟 %d 秒再执行", delay)
+                time.sleep(delay)
         self._running = True
         try:
             self._do_sign(source="cron")
@@ -411,18 +447,23 @@ class NodeSeek(_PluginBase):
         }
 
         if not self._cookie:
-            result["message"] = "未配置 Cookie，请先在插件设置中填写"
-            logger.error(f"NodeSeek 签到失败：{result['message']}")
-            self._notify_result(result, date, clock)
-            return result
+            if self._cookie_first and self._refresh_cookie_if_needed():
+                logger.info("NodeSeek：当前无 Cookie，已通过干净浏览器取得新 Cookie")
+            else:
+                result["message"] = "未配置 Cookie，且未能通过账号密码刷新"
+                logger.error(f"NodeSeek 签到失败：{result['message']}")
+                self._notify_result(result, date, clock)
+                return result
 
         headers = dict(self.SIGN_HEADERS)
         headers["Cookie"] = self._cookie
         proxies = self._get_proxies()
 
+        sign_url = self.SIGN_API + ("?random=true" if self._ns_random else "")
+        logger.info("NodeSeek 签到模式：%s", "随机 1~11 鸡腿" if self._ns_random else "固定 5 鸡腿")
         try:
             response = self._smart_post(
-                url=self.SIGN_API,
+                url=sign_url,
                 headers=headers,
                 data=b"",
                 proxies=proxies,
@@ -434,8 +475,20 @@ class NodeSeek(_PluginBase):
             self._notify_result(result, date, clock)
             return result
 
-        # 解析响应
+        # Cookie 优先：只有明确判定失效时，才用干净浏览器账密刷新并重试一次。
         result.update(self._parse_response(response))
+        if result["cookie_invalid"] and self._cookie_first and self._refresh_cookie_if_needed():
+            logger.info("NodeSeek：新 Cookie 已取得，重试签到一次")
+            headers["Cookie"] = self._cookie
+            response = self._smart_post(
+                url=sign_url,
+                headers=headers,
+                data=b"",
+                proxies=proxies,
+                timeout=30,
+            )
+            result = {"success": False, "already": False, "cookie_invalid": False, "message": "", "gain": 0, "current": 0}
+            result.update(self._parse_response(response))
         logger.info(
             f"NodeSeek 签到结果：success={result['success']} already={result['already']} "
             f"cookie_invalid={result['cookie_invalid']} message={result['message']}"
@@ -469,9 +522,11 @@ class NodeSeek(_PluginBase):
         if "application/json" not in ct:
             text = (response.text or "")[:500]
             if "Just a moment" in text or "cf-challenge" in text:
-                result["message"] = "Cloudflare 拦截（Just a moment），请稍后重试或检查代理"
+                result["message"] = "Cloudflare 拦截（Just a moment），Cookie 可能已失效"
+                result["cookie_invalid"] = True
             elif "high risk action" in text:
-                result["message"] = "风控拦截（high risk action），请稍后重试"
+                result["message"] = "风控拦截（high risk action），Cookie 可能已失效"
+                result["cookie_invalid"] = True
             elif status == 403:
                 result["message"] = f"被服务器拦截（HTTP 403），可能 Cookie 过期或 IP 风控"
             else:
@@ -500,18 +555,117 @@ class NodeSeek(_PluginBase):
                 result["gain"] = self._extract_number(msg)
             return result
 
-        # 今日已签到
-        if "已完成签到" in msg or "已签到" in msg or "鸡腿" in msg:
-            result["already"] = True
-            return result
-
-        # Cookie 失效
+        # Cookie 失效优先于“鸡腿”文案判断
         if "USER NOT FOUND" in msg or data.get("status") == 404:
             result["cookie_invalid"] = True
             result["message"] = "USER NOT FOUND — Cookie 已失效，请更新"
             return result
 
+        # 今日已签到
+        if "已完成签到" in msg or "已签到" in msg or "鸡腿" in msg:
+            result["already"] = True
+            return result
+
         return result
+
+    def _parse_accounts(self) -> list[dict]:
+        """解析账号密码，每行支持 用户名----密码 / 用户名:密码。"""
+        accounts = []
+        for line in (self._accounts or "").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            for sep in ("----", "：", ":", "|", "\t"):
+                if sep in line:
+                    user, password = (x.strip() for x in line.split(sep, 1))
+                    if user and password:
+                        accounts.append((user, password))
+                    break
+        return accounts
+
+    def _solve_turnstile(self) -> str:
+        """使用配置的 YesCaptcha/2Captcha 获取 Turnstile token。"""
+        if not self._client_key or YesCaptchaSolver is None:
+            raise RuntimeError("未配置验证码服务 API 密钥或 solver 依赖不可用")
+        base = self._api_base_url
+        if not base:
+            base = "https://api.2captcha.com" if self._solver_type in ("2captcha", "twocaptcha") else "https://api.yescaptcha.com"
+        solver = YesCaptchaSolver(api_base_url=base, client_key=self._client_key, proxies=self._get_proxies(), soft_id=None if self._solver_type in ("2captcha", "twocaptcha") else "62709")
+        token = solver.solve(url="https://www.nodeseek.com/signIn.html", sitekey="0x4AAAAAAAaNy7leGjewpVyR", user_agent=self.DEFAULT_UA)
+        if not token:
+            raise RuntimeError("验证码服务未返回 token")
+        return token
+
+    def _browser_login(self, user: str, password: str) -> str:
+        """在干净 CloakBrowser 上下文中登录，不注入旧 Cookie，返回新业务 Cookie。"""
+        try:
+            from cloakbrowser import launch_context
+        except Exception as e:
+            raise RuntimeError(f"CloakBrowser 不可用：{e}") from e
+        token = self._solve_turnstile()
+        context = page = None
+        try:
+            logger.info("NodeSeek：Cookie 失效，使用干净 CloakBrowser 上下文登录")
+            context = launch_context(headless=True)
+            page = context.new_page()
+            page.goto("https://www.nodeseek.com/signIn.html", timeout=60000)
+            try:
+                page.wait_for_load_state("networkidle", timeout=60000)
+            except Exception:
+                pass
+            result = page.evaluate("""
+            async ({token, username, password}) => {
+              const out = {};
+              let pre = null;
+              try {
+                const u = performance.getEntriesByType('resource').map(x => x.name).find(x => /\\/assets\\/preLogin-[^/]*\\.js/.test(x));
+                if (u) pre = await import(u);
+              } catch (e) { out.error = 'preLogin unavailable'; }
+              let headers = {};
+              try { if (pre && pre.g) headers = await pre.g(); } catch (e) { out.error = 'integrity header failed'; }
+              const r = await fetch('/api/account/signIn', {method:'POST', credentials:'include', headers:Object.assign({'Content-Type':'application/json','x-captcha-token':token,'x-captcha-source':'turnstile'}, headers), body:JSON.stringify({username,password})});
+              out.status = r.status; try { out.body = await r.json(); } catch (e) { out.body = {}; }
+              return out;
+            }
+            """, {"token": token, "username": user, "password": password}) or {}
+            body = result.get("body") or {}
+            if not body.get("success"):
+                raise RuntimeError(f"账密登录失败（HTTP {result.get('status', 0)}）")
+            pairs = {}
+            for item in (context.cookies() or []):
+                name, value, domain = item.get("name"), item.get("value"), item.get("domain", "")
+                if name and "nodeseek.com" in domain and name != "cf_clearance":
+                    pairs[name] = value
+            if not pairs:
+                raise RuntimeError("登录成功但未取得 NodeSeek Cookie")
+            cookie = "; ".join(f"{k}={v}" for k, v in pairs.items())
+            logger.info("NodeSeek：干净浏览器登录成功，已取得新的 Cookie 字段")
+            return cookie
+        finally:
+            try:
+                if page:
+                    page.close()
+            finally:
+                if context:
+                    context.close()
+
+    def _refresh_cookie_if_needed(self) -> bool:
+        """Cookie 失效后用第一个账号刷新并写回配置。"""
+        accounts = self._parse_accounts()
+        if not accounts:
+            logger.warning("NodeSeek：Cookie 已失效，但未配置账号密码")
+            return False
+        user, password = accounts[0]
+        try:
+            new_cookie = self._browser_login(user, password)
+            self._cookie = new_cookie
+            if self._auto_save_cookie:
+                self.__update_config()
+                logger.info("NodeSeek：新 Cookie 已写回插件配置")
+            return True
+        except Exception as e:
+            logger.error("NodeSeek：自动登录刷新 Cookie 失败：%s", e)
+            return False
 
     def _smart_post(self, url: str, headers: dict, data=None, proxies=None, timeout: int = 30):
         """
