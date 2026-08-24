@@ -116,21 +116,21 @@ class PluginClinic(_PluginBase):
         """注册 API 路由"""
         return [
             {
-                "path": "/pluginclinic/scan",
+                "path": "/scan",
                 "summary": "扫描插件状态",
                 "description": "扫描所有插件的加载状态与残留情况",
                 "endpoint": self._api_scan,
                 "methods": ["POST"],
             },
             {
-                "path": "/pluginclinic/clean",
+                "path": "/clean",
                 "summary": "清理插件",
-                "description": "清理指定插件或全部异常插件（body: {\"pids\": [...], \"scope\": \"selected|all\"}）",
+                "description": "API 路由由 MoviePilot 自动加上 `/pluginclinic` 前缀，body 支持 `pids` 与 `scope`",
                 "endpoint": self._api_clean,
                 "methods": ["POST"],
             },
             {
-                "path": "/pluginclinic/records",
+                "path": "/records",
                 "summary": "获取清理记录",
                 "description": "获取最近的清理记录",
                 "endpoint": self._api_records,
@@ -786,28 +786,37 @@ class PluginClinic(_PluginBase):
             "data": scan,
         }
 
-    def _api_clean(self, *args, **kwargs) -> dict:
+    def _api_clean(
+        self,
+        pid: str = "",
+        scope: str = "selected",
+        pids: str = "",
+        data: Optional[Dict[str, Any]] = None,
+        **kwargs,
+    ) -> dict:
         """
         API：执行已由用户点击确认的清理。
 
-        兼容页面 VBtn 的 params（pid/scope 直接作为关键字参数）和外部 API
-        的 JSON body（data.pids / data.scope）两种调用方式。
+        MoviePilot 页面按钮的 ``params`` 会作为查询参数传入，因此这里必须
+        使用显式参数签名；仅使用 ``*args, **kwargs`` 时 FastAPI 不会把查询
+        参数注入 kwargs，表现就是点击后没有实际清理。
+        同时兼容 JSON body 和逗号分隔的 pids 查询参数。
         """
-        data = kwargs.get("data") or {}
-        if not isinstance(data, dict):
-            data = {}
-        scope = kwargs.get("scope") or data.get("scope") or "selected"
-        pid = kwargs.get("pid") or data.get("pid")
-        pids = kwargs.get("pids") or data.get("pids") or []
+        body = data if isinstance(data, dict) else {}
+        pid = pid or body.get("pid") or kwargs.get("pid", "")
+        scope = scope or body.get("scope") or kwargs.get("scope", "selected")
+        raw_pids = pids or body.get("pids") or kwargs.get("pids", [])
         if pid:
-            pids = [pid]
-        if isinstance(pids, str):
-            pids = [pids]
+            selected = [pid]
+        elif isinstance(raw_pids, str):
+            selected = [item.strip() for item in raw_pids.split(",") if item.strip()]
+        else:
+            selected = list(raw_pids or [])
         if scope not in ("selected", "all"):
             return {"code": 0, "message": "无效清理范围", "data": []}
-        if scope == "selected" and not pids:
+        if scope == "selected" and not selected:
             return {"code": 0, "message": "请先选择要清理的插件", "data": []}
-        return self._clean(pids=list(pids), scope=scope)
+        return self._clean(pids=selected, scope=scope)
 
     def _api_records(self, *args, **kwargs) -> dict:
         """API：获取清理记录"""

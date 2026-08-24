@@ -36,7 +36,7 @@
 - 命令：`/pluginclinic`（扫描并通知结果）
 - API：
   ```bash
-  # 扫描
+  # 扫描（插件 API 内部路径由 MoviePilot 自动拼接）
   curl -X POST http://<MP地址>:3000/api/v1/plugin/pluginclinic/scan
   # 清理指定插件
   curl -X POST http://<MP地址>:3000/api/v1/plugin/pluginclinic/clean \
