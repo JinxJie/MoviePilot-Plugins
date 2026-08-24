@@ -198,9 +198,13 @@ class NodeSeek(_PluginBase):
         month_days = len({str(r.get("date") or "")[:10] for r in success_records if str(r.get("date") or "").startswith(this_month)})
 
         # 最近一次签到状态
+        last_status = "—"
+        last_status_color = "secondary"
+        last_note = "暂无记录"
         if records:
             last = records[-1]
-            last_status = "✅ 成功" if last.get("success") else "❌ 失败"
+            last_status = "✅ 成功" if last.get("success") else ("ℹ️ 已签到" if last.get("already") else "❌ 失败")
+            last_status_color = "success" if last.get("success") else ("info" if last.get("already") else "error")
             last_note = f"{(last.get('date') or '—')} {(last.get('time') or '')}".strip()
         else:
             last_status = "—"
@@ -257,7 +261,7 @@ class NodeSeek(_PluginBase):
         ]
         run_table = {
             "component": "VTable",
-            "props": {"hover": True, "density": "compact", "class": "run-records-table"},
+            "props": {"hover": True, "density": "compact", "class": "run-records-table", "style": "min-width: 680px;"},
             "content": [
                 {"component": "thead", "content": [run_tr(run_columns, head=True)]},
                 {"component": "tbody", "content": []},
@@ -304,7 +308,7 @@ class NodeSeek(_PluginBase):
                                                 kpi_card("📅", "本月签到", f"{month_days:,}", "", "当月成功签到天数"),
                                             ]},
                                             {"component": "VCol", "props": {"cols": 6}, "content": [
-                                                kpi_card("📌", "最近签到", last_status, "success" if last_status.startswith("✅") else "error", last_note),
+                                                kpi_card("📌", "最近签到", last_status, last_status_color, last_note),
                                             ]},
                                         ]},
                                         {"component": "div", "props": {"class": "text-caption text-medium-emphasis mt-2"},
@@ -348,7 +352,7 @@ class NodeSeek(_PluginBase):
                                         {"component": "VCardTitle", "text": "签到记录"},
                                         {"component": "VCardSubtitle", "text": "最近 12 次运行明细"},
                                     ]},
-                                    {"component": "VCardText", "props": {"class": "pa-2"}, "content": [run_table]},
+                                    {"component": "VCardText", "props": {"class": "pa-0 overflow-x-auto"}, "content": [run_table]},
                                 ]
                             }
                         ]
