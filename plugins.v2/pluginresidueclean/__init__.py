@@ -11,6 +11,7 @@
 
 import shutil
 import sys
+import threading
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -57,6 +58,9 @@ class PluginResidueClean(_PluginBase):
         self._cron = "0 3 * * *"
         self._notify = True
         self._exclude_pids = ""
+        self._progress = {"running": False, "done": 0, "total": 0, "current": "", "message": "尚未开始", "started": "", "finished": ""}
+        self._progress_lock = threading.Lock()
+        self._clean_lock = threading.Lock()
 
     def init_plugin(self, config: dict = None):
         """
@@ -95,6 +99,13 @@ class PluginResidueClean(_PluginBase):
                 "description": "扫描卸载后仍有残留的插件（目录/数据/配置/模块缓存/文件夹配置）",
                 "endpoint": self.api_scan,
                 "methods": ["POST"],
+            },
+            {
+                "path": "/progress",
+                "summary": "获取清理进度",
+                "description": "获取当前清理任务进度",
+                "endpoint": self.api_progress,
+                "methods": ["GET"],
             },
             {
                 "path": "/clean",
@@ -239,6 +250,17 @@ class PluginResidueClean(_PluginBase):
         """
         一键清理所有卸载残留（排除自身与排除列表）。
         """
+        logger.info("插件残留清理：开始执行清理任务")
+        if not self._clean_lock.acquire(blocking=False):
+            logger.warning("插件残留清理：已有清理任务正在运行，拒绝重复启动")
+            return {"code": 0, "success": False, "message": "已有清理任务正在运行", "data": []}
+        try:
+            return self._clean_locked()
+        finally:
+            self._clean_lock.release()
+
+    def _clean_locked(self) -> dict:
+        """实际清理实现；由 _clean 串行保护。"""
         try:
             installed = SystemConfigOper().get(SystemConfigKey.UserInstalledPlugins) or []
             folders = SystemConfigOper().get(SystemConfigKey.PluginFolders) or {}
@@ -249,33 +271,42 @@ class PluginResidueClean(_PluginBase):
 
         pm = PluginManager()
         targets = [it for it in self._scan().get("leftovers", []) if it["pid"]]
+        total = len(targets)
+        self._set_progress(True, 0, total, "准备开始", "")
+        logger.info("插件残留清理：共发现 %d 个可清理残留", total)
         results = []
-        for it in targets:
+        for index, it in enumerate(targets, 1):
             pid = it["pid"]
             lp = pid.lower()
+            logger.info("插件残留清理：开始处理 [%d/%d] %s，残留项=%s", index, total, pid, "、".join(it.get("leftovers", [])))
+            self._set_progress(True, index - 1, total, f"正在处理 {pid}", pid)
             steps = []
             ok = True
             try:
                 # 1. 删除目录
                 for d in (plugins_dir / pid, plugins_dir / lp):
                     if d.exists():
+                        logger.info("插件残留清理：[%s] 删除目录 %s", pid, d)
                         shutil.rmtree(d, ignore_errors=True)
                         steps.append("目录")
                 # 2. 删除数据
                 try:
                     PluginDataOper().del_data(lp)
+                    logger.info("插件残留清理：[%s] 删除插件数据", pid)
                     steps.append("数据")
                 except Exception:
                     pass
                 # 3. 删除配置
                 try:
                     SystemConfigOper().delete(f"plugin.{lp}")
+                    logger.info("插件残留清理：[%s] 删除插件配置 plugin.%s", pid, lp)
                     steps.append("配置")
                 except Exception:
                     pass
                 # 4. 清除模块缓存
                 try:
                     pm._clear_plugin_modules(lp)
+                    logger.info("插件残留清理：[%s] 清除模块缓存 app.plugins.%s", pid, lp)
                     steps.append("模块缓存")
                 except Exception:
                     pass
@@ -287,6 +318,7 @@ class PluginResidueClean(_PluginBase):
                         changed = True
                 if changed:
                     SystemConfigOper().set(SystemConfigKey.PluginFolders, folders)
+                    logger.info("插件残留清理：[%s] 移除文件夹配置引用", pid)
                     steps.append("文件夹配置")
             except Exception as e:
                 ok = False
@@ -294,6 +326,8 @@ class PluginResidueClean(_PluginBase):
                 logger.error(f"插件残留清理 {pid} 失败：{e}")
 
             results.append({"pid": pid, "success": ok, "steps": steps})
+            logger.info("插件残留清理：完成 [%d/%d] %s，结果=%s，步骤=%s", index, total, pid, "成功" if ok else "失败", "、".join(steps) or "无")
+            self._set_progress(True, index, total, f"已完成 {pid}", pid)
 
         # 保存文件夹配置变更
         try:
@@ -305,6 +339,7 @@ class PluginResidueClean(_PluginBase):
         failed = len(results) - cleaned
         message = f"清理完成：成功 {cleaned} 个，失败 {failed} 个"
         logger.info(f"插件残留清理：{message}")
+        self._set_progress(False, total, total, message, "")
 
         if self._notify and results:
             self._notify_clean(results, cleaned, failed)
@@ -312,6 +347,26 @@ class PluginResidueClean(_PluginBase):
         return {"code": 1 if failed == 0 else 0, "success": failed == 0, "message": message, "data": results}
 
     # ======================== 通知 ========================
+
+    def api_progress(self) -> dict:
+        """API：获取清理进度"""
+        with self._progress_lock:
+            progress = dict(self._progress)
+        total = progress.get("total", 0)
+        done = progress.get("done", 0)
+        progress["percent"] = int(done * 100 / total) if total else (100 if not progress.get("running") else 0)
+        logger.debug("插件残留清理：查询进度 %s", progress)
+        return {"success": True, "code": 1, "message": progress.get("message", ""), "data": progress}
+
+    def _set_progress(self, running: bool, done: int, total: int, message: str, current: str):
+        """更新内存进度，供页面轮询。"""
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with self._progress_lock:
+            self._progress.update({"running": running, "done": done, "total": total, "current": current, "message": message})
+            if running and not self._progress.get("started"):
+                self._progress["started"] = now
+            if not running:
+                self._progress["finished"] = now
 
     def _notify_scan(self, leftovers: List[dict]):
         """定时扫描发现残留通知（不自动清理）"""
@@ -372,11 +427,12 @@ class PluginResidueClean(_PluginBase):
         清理目标始终是「已卸载但有残留」的插件，不受请求参数影响。
         """
         logger.info("插件残留清理：收到清理请求 scope=%s", scope)
-        try:
-            return self._clean()
-        except Exception as e:
-            logger.error(f"插件残留清理执行失败：{e}")
-            return {"success": False, "code": 0, "message": f"清理失败：{e}", "data": []}
+        if self._clean_lock.locked():
+            logger.warning("插件残留清理：已有任务运行中，拒绝重复启动")
+            return {"success": False, "code": 0, "message": "已有清理任务正在运行", "data": {}}
+        threading.Thread(target=self._clean, name="pluginresidueclean", daemon=True).start()
+        logger.info("插件残留清理：已启动后台清理线程，页面可通过进度按钮刷新")
+        return {"success": True, "code": 1, "message": "清理任务已启动，请点击‘刷新进度’查看", "data": self.api_progress().get("data", {})}
 
     def _save_last(self, info: dict):
         """保存最近一次操作结果，页面展示用"""
@@ -404,9 +460,14 @@ class PluginResidueClean(_PluginBase):
         items = scan.get("items", [])
         leftovers = scan.get("leftovers", [])
         count = len(leftovers)
+        progress = self.api_progress().get("data", {})
+        progress_percent = int(progress.get("percent", 0))
+        progress_text = progress.get("message", "尚未开始")
+        progress_current = progress.get("current", "")
 
         api_base = f"plugin/{self.__class__.__name__}?apikey={settings.API_TOKEN}"
         scan_api = f"plugin/{self.__class__.__name__}/scan?apikey={settings.API_TOKEN}"
+        progress_api = f"plugin/{self.__class__.__name__}/progress?apikey={settings.API_TOKEN}"
         clean_api = f"plugin/{self.__class__.__name__}/clean?apikey={settings.API_TOKEN}&scope=all"
 
         def cell(text: Any, cls: str) -> dict:
@@ -471,6 +532,17 @@ class PluginResidueClean(_PluginBase):
                                                     {
                                                         "component": "VBtn",
                                                         "props": {
+                                                            "color": "info",
+                                                            "size": "small",
+                                                            "variant": "tonal",
+                                                            "prepend-icon": "mdi-progress-clock",
+                                                        },
+                                                        "text": "刷新进度",
+                                                        "events": {"click": {"api": progress_api, "method": "get"}},
+                                                    },
+                                                    {
+                                                        "component": "VBtn",
+                                                        "props": {
                                                             "color": "error",
                                                             "size": "small",
                                                             "variant": "tonal",
@@ -488,6 +560,17 @@ class PluginResidueClean(_PluginBase):
                                         "component": "VCardSubtitle",
                                         "props": {"class": "px-4 pb-2"},
                                         "text": "清理对象为已卸载但仍有残留的插件（目录/数据/配置/模块缓存/文件夹配置）。插件自身与排除列表始终受保护；定时扫描只通知，不自动清理。",
+                                    },
+                                    {
+                                        "component": "VCardText",
+                                        "props": {"class": "px-4 pt-0 pb-2"},
+                                        "content": [
+                                            {"component": "div", "props": {"class": "d-flex justify-space-between text-caption mb-1"}, "content": [
+                                                {"component": "span", "text": f"{progress_text}{('：' + progress_current) if progress_current else ''}"},
+                                                {"component": "span", "text": f"{progress_percent}%（{progress.get('done', 0)}/{progress.get('total', 0)}）"},
+                                            ]},
+                                            {"component": "VProgressLinear", "props": {"model-value": progress_percent, "color": "info" if progress.get("running") else "success", "height": 8, "rounded": True}},
+                                        ],
                                     },
                                     {
                                         "component": "VCardText",

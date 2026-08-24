@@ -26,7 +26,8 @@ def build_form() -> Tuple[List[dict], Dict[str, Any]]:
                                     "props": {
                                         "model": "scheduled_scan",
                                         "label": "定时扫描",
-                                        "hint": "开启后按下方时间自动扫描，发现残留仅发通知，不自动清理",
+                                        "hint": "开启后按下方时间自动扫描；只检查卸载残留并发送通知，绝不自动删除任何内容",
+                                        "persistent-hint": True,
                                     },
                                 }
                             ],
@@ -40,7 +41,8 @@ def build_form() -> Tuple[List[dict], Dict[str, Any]]:
                                     "props": {
                                         "model": "notify",
                                         "label": "发送通知",
-                                        "hint": "扫描发现残留 / 清理完成均通过此开关控制",
+                                        "hint": "控制插件通知总开关：定时扫描发现残留、手动清理完成和清理失败都会通知",
+                                        "persistent-hint": True,
                                     },
                                 }
                             ],
@@ -61,7 +63,8 @@ def build_form() -> Tuple[List[dict], Dict[str, Any]]:
                                         "model": "cron",
                                         "label": "扫描时间",
                                         "placeholder": "0 3 * * *",
-                                        "hint": "默认每天 03:00 扫描一次",
+                                        "hint": "每天按此 Cron 规则执行只读扫描；扫描不会删除目录、数据或配置",
+                                        "persistent-hint": True,
                                     },
                                 }
                             ],
@@ -82,7 +85,8 @@ def build_form() -> Tuple[List[dict], Dict[str, Any]]:
                                         "model": "exclude_pids",
                                         "label": "排除插件 ID（可选）",
                                         "placeholder": "多个 ID 用英文逗号分隔，例如：hhlottery,nodeseek",
-                                        "hint": "这些插件即使有残留也不会被清理；插件自身始终受保护",
+                                        "hint": "填写插件目录 ID，多个 ID 用英文逗号分隔；排除项只展示、不删除，插件自身始终受保护",
+                                        "persistent-hint": True,
                                     },
                                 }
                             ],
