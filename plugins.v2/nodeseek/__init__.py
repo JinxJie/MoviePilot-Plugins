@@ -226,7 +226,7 @@ class NodeSeek(_PluginBase):
                 right.append({"component": "div", "props": {"class": "text-caption text-medium-emphasis"}, "text": note})
             return {
                 "component": "VCard",
-                "props": {"variant": "tonal", "class": "h-100"},
+                "props": {"variant": "flat", "elevation": 2, "class": "h-100 rounded-lg"},
                 "content": [
                     {"component": "VCardText", "props": {"class": "d-flex align-center"}, "content": [
                         {"component": "VAvatar", "props": {"rounded": True, "variant": "tonal", "color": "primary", "size": "x-large", "class": "me-3 flex-shrink-0"}, "content": [
@@ -284,8 +284,14 @@ class NodeSeek(_PluginBase):
                     {
                         "component": "VCol", "props": {"cols": 12, "md": 6}, "content": [
                             {
-                                "component": "VCard", "props": {"variant": "tonal", "color": "primary", "class": "h-100"}, "content": [
-                                    {"component": "VCardTitle", "text": "🗓️ 签到概况"},
+                                "component": "VCard", "props": {"variant": "flat", "elevation": 2, "class": "h-100 rounded-lg"}, "content": [
+                                    {"component": "VCardItem", "props": {"class": "pb-1"}, "content": [
+                                        {"component": "template", "props": {"v-slot:prepend": True}, "content": [
+                                            {"component": "VAvatar", "props": {"color": "primary", "variant": "tonal", "rounded": "lg"}, "content": [{"component": "span", "props": {"style": "font-size: 1.35rem"}, "text": "🗓️"}]}
+                                        ]},
+                                        {"component": "VCardTitle", "text": "签到概况"},
+                                        {"component": "VCardSubtitle", "text": "持续记录每一次签到结果与收益"},
+                                    ]},
                                     {"component": "VCardText", "props": {"class": "pa-2"}, "content": [
                                         {"component": "VRow", "props": {"dense": True}, "content": [
                                             {"component": "VCol", "props": {"cols": 6}, "content": [
@@ -311,8 +317,12 @@ class NodeSeek(_PluginBase):
                     {
                         "component": "VCol", "props": {"cols": 12, "md": 6}, "content": [
                             {
-                                "component": "VCard", "props": {"variant": "tonal", "color": "info", "class": "h-100"}, "content": [
-                                    {"component": "VCardTitle", "text": "ℹ️ 说明"},
+                                "component": "VCard", "props": {"variant": "flat", "elevation": 2, "class": "h-100 rounded-lg"}, "content": [
+                                    {"component": "VCardItem", "props": {"class": "pb-1"}, "content": [
+                                        {"component": "VAvatar", "props": {"color": "info", "variant": "tonal", "rounded": "lg"}, "content": [{"component": "span", "props": {"style": "font-size: 1.35rem"}, "text": "💡"}]},
+                                        {"component": "VCardTitle", "text": "运行指南"},
+                                        {"component": "VCardSubtitle", "text": "让签到稳定运行的几个关键点"},
+                                    ]},
                                     {"component": "VCardText", "content": [
                                         {"component": "div", "props": {"class": "text-body-2"}, "content": [
                                             {"component": "p", "props": {"class": "mb-1"}, "text": "📌 NodeSeek 每天 00:00 刷新签到，越早签到排名越靠前，可能获得额外鸡腿。"},
@@ -332,8 +342,12 @@ class NodeSeek(_PluginBase):
                     {
                         "component": "VCol", "props": {"cols": 12}, "content": [
                             {
-                                "component": "VCard", "props": {"variant": "tonal", "color": "warning"}, "content": [
-                                    {"component": "VCardTitle", "text": "📋 签到记录（最近 12 次）"},
+                                "component": "VCard", "props": {"variant": "flat", "elevation": 2, "class": "rounded-lg"}, "content": [
+                                    {"component": "VCardItem", "props": {"class": "pb-1"}, "content": [
+                                        {"component": "VAvatar", "props": {"color": "warning", "variant": "tonal", "rounded": "lg"}, "content": [{"component": "span", "props": {"style": "font-size: 1.35rem"}, "text": "📋"}]},
+                                        {"component": "VCardTitle", "text": "签到记录"},
+                                        {"component": "VCardSubtitle", "text": "最近 12 次运行明细"},
+                                    ]},
                                     {"component": "VCardText", "props": {"class": "pa-2"}, "content": [run_table]},
                                 ]
                             }

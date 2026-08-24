@@ -13,6 +13,15 @@ def build_form() -> Tuple[List[dict], Dict[str, Any]]:
         {
             "component": "VForm",
             "content": [
+                {
+                    "component": "VAlert",
+                    "props": {"type": "info", "variant": "tonal", "density": "compact", "class": "mb-4", "icon": "mdi-information-outline"},
+                    "text": "首次使用请粘贴 NodeSeek Cookie；保存“立即运行一次”后可验证 Cookie 是否有效。Cookie 仅保存在 MoviePilot 插件配置中。",
+                },
+                {
+                    "component": "VDivider",
+                    "props": {"class": "mb-4"},
+                },
                 # 第一行：开关组（启用 / 立即运行一次 / 通知 / 代理）
                 {
                     "component": "VRow",
@@ -26,7 +35,8 @@ def build_form() -> Tuple[List[dict], Dict[str, Any]]:
                                     "props": {
                                         "model": "enabled",
                                         "label": "启用插件",
-                                        "hint": "开启后按签到时间自动运行",
+                                        "hint": "仅影响定时任务；关闭后仍可手动签到或使用“立即运行一次”",
+                                        "persistent-hint": True,
                                     },
                                 }
                             ],
@@ -40,7 +50,8 @@ def build_form() -> Tuple[List[dict], Dict[str, Any]]:
                                     "props": {
                                         "model": "onlyonce",
                                         "label": "立即运行一次",
-                                        "hint": "保存后立即签到一次，完成后自动复位",
+                                        "hint": "保存后立即执行一次签到，用于验证 Cookie；完成后自动关闭，不会重复执行",
+                                        "persistent-hint": True,
                                     },
                                 }
                             ],
@@ -54,7 +65,8 @@ def build_form() -> Tuple[List[dict], Dict[str, Any]]:
                                     "props": {
                                         "model": "notify",
                                         "label": "发送通知",
-                                        "hint": "签到成功/失败/Cookie 失效均通过此开关控制",
+                                        "hint": "建议开启；签到成功、重复签到、Cookie 失效和网络错误都会发送结果",
+                                        "persistent-hint": True,
                                     },
                                 }
                             ],
@@ -68,7 +80,8 @@ def build_form() -> Tuple[List[dict], Dict[str, Any]]:
                                     "props": {
                                         "model": "use_proxy",
                                         "label": "使用系统代理",
-                                        "hint": "通过 MoviePilot 系统代理访问 NodeSeek",
+                                        "hint": "仅在你的 MoviePilot 已正确配置系统代理时开启；关闭则直连 NodeSeek",
+                                        "persistent-hint": True,
                                     },
                                 }
                             ],
