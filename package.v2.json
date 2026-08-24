@@ -32,5 +32,18 @@
     "history": {
       "v1.0.0": "首发版本：每日定时自动签到、curl_cffi 过 Cloudflare、鸡腿收益统计、签到历史、消息通知、手动签到命令与 API"
     }
+  },
+  "PluginClinic": {
+    "name": "插件诊所",
+    "description": "扫描无法加载的插件与卸载残留，勾选清理一键清干净，让重新安装一路顺畅。",
+    "labels": "插件,清理,诊断",
+    "version": "1.0.0",
+    "icon": "https://raw.githubusercontent.com/JinxJie/MoviePilot-Plugins/main/icons/pluginclinic.png",
+    "author": "JinxJie",
+    "level": 2,
+    "release": false,
+    "history": {
+      "v1.0.0": "首发版本：打开页面自动扫描插件加载状态与残留，手动勾选清理，清理记录留痕，安全排除自身与排除列表"
+    }
   }
 }
