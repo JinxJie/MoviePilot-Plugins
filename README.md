@@ -86,20 +86,20 @@ https://github.com/JinxJie/MoviePilot-Plugins
 
 ## 目录结构
 
-```
-icons/                          # 插件图标
-plugins/                        # V1 插件（暂无）
-plugins.v2/                    # V2 插件
-  hhlottery/                   # HHCLUB 自动抽奖
-    __init__.py                # 插件入口
-    config_form.py             # 配置页表单
-    helpers.py                 # 工具函数
-package.json                    # V1 插件索引
-package.v2.json                # V2 插件索引
-package.v3.json                # V3 插件索引
-docs/                          # 官方文档
-scripts/                       # 官方脚本
-tests/                         # 官方测试
+```text
+MoviePilot-Plugins/
+├── docs/                       # 官方文档
+├── icons/                      # 插件图标
+│   └── hhlottery.png
+├── plugins/                    # V1 插件
+├── plugins.v2/                 # V2 插件
+│   └── hhlottery/
+├── scripts/                    # 官方脚本
+├── tests/                      # 官方测试
+├── package.json                # V1 插件索引
+├── package.v2.json             # V2 插件索引
+├── package.v3.json             # V3 插件索引
+└── README.md                   # 仓库说明
 ```
 
 ## 开发新插件
