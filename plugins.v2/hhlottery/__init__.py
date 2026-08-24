@@ -156,7 +156,10 @@ class HHLottery(_PluginBase):
     _save_id: str = ""
     _save_epoch: int = 0
     _current_save_version: str = ""
-
+    # 动态冷却：上一抽返回的转盘时长（毫秒）
+    _last_duration_ms: int = 0
+    _last_draw_sent_at: float = 0.0
+    _quick_retry_ms: int = 0
     def init_plugin(self, config: dict = None):
         """
         初始化插件，加载配置
@@ -803,6 +806,9 @@ class HHLottery(_PluginBase):
         self._running = True
         self._stop_requested = False
         self._notify_on_stop = False
+        self._last_duration_ms = 0
+        self._last_draw_sent_at = 0.0
+        self._quick_retry_ms = 0
         active_seq = self._active_seq = self._config_seq
         logger.info(f"🎰 HHCLUB 自动抽奖任务开始（配置序号 {active_seq}）")
         logger.info(f"🔐 当前活跃序号={self._active_seq}，最新配置序号={self._config_seq}")
@@ -913,40 +919,50 @@ class HHLottery(_PluginBase):
                     stop_reason = f"连续 {consecutive_throttle} 次被限流"
                     break
 
-                # 执行抽奖
+                # 等待上一抽的动态冷却；请求发出后开始计时，响应耗时已包含在窗口内
+                if self._quick_retry_ms > 0:
+                    wait_ms = self._quick_retry_ms
+                    self._quick_retry_ms = 0
+                elif self._last_duration_ms and self._last_draw_sent_at:
+                    elapsed_ms = (time.monotonic() - self._last_draw_sent_at) * 1000
+                    wait_ms = max(0, self._last_duration_ms - elapsed_ms)
+                else:
+                    wait_ms = max(0, current_interval * 1000)
+                if wait_ms > 0:
+                    time.sleep(wait_ms / 1000)
+
+                # 请求发出时记录冷却起点；响应、记账和通知耗时都计入冷却
+                draw_sent_at = time.monotonic()
                 try:
                     result = self._do_draw()
                 except Exception as e:
                     logger.error(f"抽奖请求异常：{e}")
                     consecutive_errors += 1
                     consecutive_throttle = 0
-                    time.sleep(current_interval)
+                    self._last_duration_ms = 0
                     continue
 
                 if result is None:
+                    self._last_draw_sent_at = draw_sent_at
+                    # 请求失败时用配置间隔兜底，不沿用未知 duration
+                    self._last_duration_ms = 0
                     # 请求失败
                     consecutive_errors += 1
                     consecutive_throttle = 0
-                    time.sleep(current_interval)
+                    self._last_duration_ms = 0
                     continue
 
                 # 解析结果
+                self._last_draw_sent_at = draw_sent_at
                 ret = result.get("ret")
                 data = result.get("data", {})
 
                 if ret == -1 or ret == "throttle":
-                    # 被限流
+                    # 被限流：不扣憨豆、不重置上一抽服务端冷却，300ms 后补枪
                     consecutive_throttle += 1
                     consecutive_errors = 0
-                    logger.warning(f"⚠️ 被限流（第 {consecutive_throttle} 次），增加间隔")
-
-                    # 自适应增加间隔
-                    current_interval = min(
-                        current_interval * self.INTERVAL_MULTIPLIER,
-                        self.MAX_INTERVAL,
-                    )
-                    logger.info(f"⏱️ 间隔调整为 {current_interval:.1f} 秒")
-                    time.sleep(current_interval)
+                    self._quick_retry_ms = 300
+                    logger.warning(f"⚠️ 被限流（第 {consecutive_throttle} 次），300ms 后补枪")
                     continue
 
                 if ret != 0 and ret != "0":
@@ -955,10 +971,11 @@ class HHLottery(_PluginBase):
                     logger.warning(f"抽奖返回异常：ret={ret}, msg={msg}")
                     consecutive_errors += 1
                     consecutive_throttle = 0
-                    time.sleep(current_interval)
+                    self._last_duration_ms = 0
                     continue
 
                 # 成功抽奖
+                self._update_duration(data, draw_sent_at)
                 consecutive_errors = 0
                 consecutive_throttle = 0
 
@@ -1084,9 +1101,6 @@ class HHLottery(_PluginBase):
                     if self._clean_mail:
                         self._clean_messages()
 
-                # 等待间隔
-                time.sleep(current_interval)
-
             # 3. 最终清理站内信
             if self._clean_mail and draw_count > 0:
                 self._clean_messages()
@@ -1135,6 +1149,21 @@ class HHLottery(_PluginBase):
         finally:
             self._running = False
             logger.info("🎰 HHCLUB 自动抽奖任务结束")
+
+    def _update_duration(self, data: dict, sent_at: float) -> None:
+        """保存站点返回的下一抽冷却时长；异常值回退到固定间隔。"""
+        payload = data.get("data") if isinstance(data, dict) else None
+        raw = payload.get("duration") if isinstance(payload, dict) else None
+        try:
+            duration = int(float(raw))
+        except (TypeError, ValueError):
+            duration = 0
+        self._last_draw_sent_at = sent_at
+        self._last_duration_ms = duration if 0 < duration <= 300000 else 0
+        if self._last_duration_ms:
+            logger.info(f"⏱️ 自适应冷却：{self._last_duration_ms}ms（从请求发出时计时）")
+        else:
+            logger.info(f"⏱️ 未返回有效 duration，下一抽使用兜底间隔 {self._interval} 秒")
 
     def _do_draw(self) -> Optional[dict]:
         """
