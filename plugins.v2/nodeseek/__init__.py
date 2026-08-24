@@ -42,7 +42,7 @@ class NodeSeek(_PluginBase):
     plugin_name = "NodeSeek 自动签到"
     plugin_desc = "NodeSeek 论坛每日自动签到 · curl_cffi 浏览器指纹过 Cloudflare · 鸡腿收益统计、签到记录与消息通知"
     plugin_icon = "https://raw.githubusercontent.com/JinxJie/MoviePilot-Plugins/main/icons/nodeseek.png"
-    plugin_version = "1.0.1"
+    plugin_version = "1.0.0"
     plugin_author = "JinxJie"
     author_url = "https://github.com/JinxJie"
     plugin_config_prefix = "nodeseek_"
