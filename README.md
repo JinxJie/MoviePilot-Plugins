@@ -9,7 +9,7 @@ JinxJie 的 [MoviePilot](https://github.com/jxxghp/MoviePilot) 第三方插件�
 | 插件 | 目录 | 版本 | 说明 |
 |------|------|------|------|
 | HHCLUB 自动抽奖 | [`plugins.v2/hhlottery`](plugins.v2/hhlottery) | 1.0.8 | 定时自动抽奖、大奖即时通知、盈亏统计、站内信清理 |
-| NodeSeek 签到 | [`plugins.v2/nodeseek`](plugins.v2/nodeseek) | 1.0.0 | NodeSeek 论坛每日自动签到、鸡腿收益统计、消息通知 |
+| NodeSeek 自动签到 | [`plugins.v2/nodeseek`](plugins.v2/nodeseek) | 1.0.0 | NodeSeek 论坛每日自动签到、鸡腿收益统计、消息通知 |
 
 ## 📖 使用说明
 
@@ -79,7 +79,7 @@ https://github.com/JinxJie/MoviePilot-Plugins
 </details>
 
 <details>
-<summary>2. 📌 NodeSeek 签到（NodeSeekSign）</summary>
+<summary>2. 📌 NodeSeek 自动签到（NodeSeekSign）</summary>
 
 **v1.0.0 · 签到自动化 · NodeSeek 论坛**
 
@@ -127,7 +127,7 @@ MoviePilot-Plugins/
 ├── plugins/                    # V1 插件
 ├── plugins.v2/                 # V2 插件
 │   ├── hhlottery/              # HHCLUB 自动抽奖
-│   └── nodeseek/               # NodeSeek 签到
+│   └── nodeseek/               # NodeSeek 自动签到
 ├── scripts/                    # 官方脚本
 ├── tests/                      # 官方测试
 ├── package.json                # V1 插件索引

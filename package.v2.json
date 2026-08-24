@@ -21,7 +21,7 @@
     }
   },
   "NodeSeek": {
-    "name": "NodeSeek 签到",
+    "name": "NodeSeek 自动签到",
     "description": "NodeSeek 论坛每日自动签到，使用 curl_cffi 模拟 Chrome 指纹绕过 Cloudflare，支持鸡腿收益统计、签到记录与消息通知。",
     "labels": "签到,自动化,论坛",
     "version": "1.0.0",

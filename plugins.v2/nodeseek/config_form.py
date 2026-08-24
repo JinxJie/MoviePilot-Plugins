@@ -1,5 +1,5 @@
 """
-NodeSeek 签到插件配置表单
+NodeSeek 自动签到插件配置表单
 """
 
 from typing import Any, Dict, List, Tuple

@@ -38,7 +38,7 @@ class NodeSeekSign(_PluginBase):
     """
 
     # 插件元信息
-    plugin_name = "NodeSeek 签到"
+    plugin_name = "NodeSeek 自动签到"
     plugin_desc = "NodeSeek 论坛每日自动签到 · curl_cffi 浏览器指纹过 Cloudflare · 鸡腿收益统计、签到记录与消息通知"
     plugin_icon = "https://raw.githubusercontent.com/JinxJie/MoviePilot-Plugins/main/icons/nodeseek.png"
     plugin_version = "1.0.0"
@@ -555,12 +555,12 @@ class NodeSeekSign(_PluginBase):
             ]
             if current:
                 lines.append(f"💰 当前 {current:,} 鸡腿")
-            self._send_notification(self._format_notification("NodeSeek 签到", "\n".join(lines)))
+            self._send_notification(self._format_notification("NodeSeek 自动签到", "\n".join(lines)))
         elif result["already"]:
             if not self._notify_success:
                 return
             self._send_notification(self._format_notification(
-                "NodeSeek 签到", "ℹ️ 今日已签到过，明天再来\n\n💬 " + (result.get("message") or "已完成签到")
+                "NodeSeek 自动签到", "ℹ️ 今日已签到过，明天再来\n\n💬 " + (result.get("message") or "已完成签到")
             ))
         else:
             if not self._notify_fail:
@@ -569,7 +569,7 @@ class NodeSeekSign(_PluginBase):
                 body = "⚠️ Cookie 已失效（USER NOT FOUND）\n\n请重新获取 Cookie 后更新插件配置"
             else:
                 body = f"❌ 签到失败\n\n{result.get('message') or '未知错误'}"
-            self._send_notification(self._format_notification("NodeSeek 签到", body))
+            self._send_notification(self._format_notification("NodeSeek 自动签到", body))
 
     def _format_notification(self, title: str, body: str) -> str:
         """统一通知格式：时间戳 + 标题 + 正文"""
@@ -584,7 +584,7 @@ class NodeSeekSign(_PluginBase):
         try:
             self.post_message(
                 mtype=NotificationType.Plugin,
-                title="NodeSeek 签到",
+                title="NodeSeek 自动签到",
                 text=message,
             )
         except Exception as e:

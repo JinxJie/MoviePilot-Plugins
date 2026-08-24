@@ -1,4 +1,4 @@
-# NodeSeek 签到
+# NodeSeek 自动签到
 
 NodeSeek 论坛每日自动签到插件，适用于 [MoviePilot](https://github.com/jxxghp/MoviePilot)。
 
