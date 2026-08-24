@@ -11,6 +11,7 @@
 
 import shutil
 import sys
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import Body
@@ -345,10 +346,13 @@ class PluginResidueClean(_PluginBase):
 
     # ======================== API ========================
 
-    def api_scan(self, **kwargs) -> dict:
+    def api_scan(self) -> dict:
         """API：扫描插件残留"""
+        logger.info("插件残留清理：收到扫描请求")
         try:
             scan = self._scan()
+            self._save_last({"action": "扫描", "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                             "message": f"发现 {scan['count']} 个卸载残留"})
             return {
                 "success": True,
                 "code": 1,
@@ -359,7 +363,7 @@ class PluginResidueClean(_PluginBase):
             logger.error(f"插件残留清理扫描失败：{e}")
             return {"success": False, "code": 0, "message": f"扫描失败：{e}", "data": {}}
 
-    def api_clean(self, scope: str = "all", data: Optional[Dict[str, Any]] = Body(default=None), **kwargs) -> dict:
+    def api_clean(self, scope: str = "all", data: Optional[Dict[str, Any]] = Body(default=None)) -> dict:
         """
         API：一键清理卸载残留。
 
@@ -367,11 +371,21 @@ class PluginResidueClean(_PluginBase):
         URL 查询参数；``scope`` 从查询参数注入，``data`` 为请求体。
         清理目标始终是「已卸载但有残留」的插件，不受请求参数影响。
         """
+        logger.info("插件残留清理：收到清理请求 scope=%s", scope)
         try:
             return self._clean()
         except Exception as e:
             logger.error(f"插件残留清理执行失败：{e}")
             return {"success": False, "code": 0, "message": f"清理失败：{e}", "data": []}
+
+    def _save_last(self, info: dict):
+        """保存最近一次操作结果，页面展示用"""
+        try:
+            data = self.get_data("pluginresidueclean_state") or {}
+            data["last"] = info
+            self.save_data("pluginresidueclean_state", data)
+        except Exception:
+            pass
 
     # ======================== 页面 ========================
 
