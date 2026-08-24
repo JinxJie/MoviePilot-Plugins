@@ -527,15 +527,41 @@ class NodeSeek(_PluginBase):
         return resp
 
     def _get_proxies(self):
-        """获取系统代理"""
+        """获取并规范化系统代理，兼容字符串、字典和空值。"""
         if not self._use_proxy:
             return None
         try:
-            if settings.PROXY:
-                return {"http": settings.PROXY, "https": settings.PROXY}
-            logger.warning("已启用代理，但系统未配置代理")
+            configured = getattr(settings, "PROXY", None)
+            if not configured:
+                logger.warning("已启用代理，但系统未配置代理")
+                return None
+
+            # MoviePilot 不同版本可能返回代理 URL 或 {http, https} 字典。
+            if isinstance(configured, str):
+                proxy = configured.strip()
+                if not proxy:
+                    logger.warning("已启用代理，但系统代理地址为空")
+                    return None
+                return {"http": proxy, "https": proxy}
+
+            if isinstance(configured, dict):
+                proxies = {}
+                for scheme in ("http", "https"):
+                    value = configured.get(scheme)
+                    if isinstance(value, str) and value.strip():
+                        proxies[scheme] = value.strip()
+                # 兼容仅配置 proxy 或 all 的格式。
+                fallback = configured.get("proxy") or configured.get("all")
+                if isinstance(fallback, str) and fallback.strip():
+                    fallback = fallback.strip()
+                    proxies.setdefault("http", fallback)
+                    proxies.setdefault("https", fallback)
+                if proxies:
+                    return proxies
+
+            logger.warning("已启用代理，但系统代理格式无法识别（仅支持字符串或 URL 字典）")
         except Exception as e:
-            logger.error(f"获取代理设置出错：{e}")
+            logger.error(f"获取系统代理设置出错：{type(e).__name__}: {e}")
         return None
 
     # ======================== 数据存储 ========================
