@@ -90,7 +90,6 @@ https://github.com/JinxJie/MoviePilot-Plugins
 MoviePilot-Plugins/
 ├── docs/                       # 官方文档
 ├── icons/                      # 插件图标
-│   └── hhlottery.png
 ├── plugins/                    # V1 插件
 ├── plugins.v2/                 # V2 插件
 │   └── hhlottery/              # HHCLUB 自动抽奖
