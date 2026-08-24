@@ -9,6 +9,7 @@ JinxJie 的 [MoviePilot](https://github.com/jxxghp/MoviePilot) 第三方插件�
 | 插件 | 目录 | 版本 | 说明 |
 |------|------|------|------|
 | HHCLUB 自动抽奖 | [`plugins.v2/hhlottery`](plugins.v2/hhlottery) | 1.0.8 | 定时自动抽奖、大奖即时通知、盈亏统计、站内信清理 |
+| NodeSeek 签到 | [`plugins.v2/nodeseek`](plugins.v2/nodeseek) | 1.0.0 | NodeSeek 论坛每日自动签到、鸡腿收益统计、消息通知 |
 
 ## 📖 使用说明
 
@@ -77,6 +78,39 @@ https://github.com/JinxJie/MoviePilot-Plugins
 
 </details>
 
+<details>
+<summary>2. 📌 NodeSeek 签到（NodeSeekSign）</summary>
+
+**v1.0.0 · 签到自动化 · NodeSeek 论坛**
+
+**功能：**
+NodeSeek 论坛每日自动签到，使用 curl_cffi 模拟 Chrome 浏览器指纹绕过 Cloudflare 拦截，支持鸡腿收益统计、签到历史记录和消息通知。
+
+**标签：**
+论坛签到、每日定时、自动化、数据统计、消息通知
+
+**特点：**
+- 📅 支持 Cron 定时自动签到（默认每天 00:30，可自定义）
+- 🛡️ 使用 curl_cffi 模拟 Chrome 指纹，绕过 Cloudflare 拦截
+- 🍗 鸡腿收益统计：累计签到天数、累计鸡腿、本月签到
+- 📋 签到历史记录（最近 12 条）
+- 🔔 通知：签到成功 / 今日已签到 / 签到失败 / Cookie 失效
+- ⌨️ 命令 `/nodeseek` 与 API `/nodeseek/sign` 手动签到
+
+**使用说明：**
+1. 在 MoviePilot 插件管理中添加本仓库地址并安装插件。
+2. 浏览器登录 NodeSeek，F12 → Application → Cookies 复制 `nodeseek.com` Cookie 值，填入插件配置。
+3. 配置签到时间（默认每天 00:30，想抢前排排名可改为 `5 0 * * *`）。
+4. 确保安装 `curl_cffi` 依赖，否则会被 Cloudflare 拦截（插件会自动回退 requests 并提示）。
+
+**免责声明：**
+本插件仅通过站点现有接口执行签到操作，不会修改任何站点数据。站点规则、接口或防护策略变更可能导致功能异常，请自行评估后使用；因使用本插件产生的任何问题，开发者不承担责任。
+
+**更新说明：**
+- v1.0.0：首发版本，支持每日定时自动签到、curl_cffi 过 Cloudflare、鸡腿收益统计、签到历史、消息通知、手动签到命令与 API。
+
+</details>
+
 ## ⚠️ 注意事项
 
 - 本插件库中的插件均为个人维护，使用前请仔细阅读说明。
@@ -92,7 +126,8 @@ MoviePilot-Plugins/
 ├── icons/                      # 插件图标
 ├── plugins/                    # V1 插件
 ├── plugins.v2/                 # V2 插件
-│   └── hhlottery/              # HHCLUB 自动抽奖
+│   ├── hhlottery/              # HHCLUB 自动抽奖
+│   └── nodeseek/               # NodeSeek 签到
 ├── scripts/                    # 官方脚本
 ├── tests/                      # 官方测试
 ├── package.json                # V1 插件索引
