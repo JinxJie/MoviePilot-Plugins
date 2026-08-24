@@ -239,7 +239,11 @@ class NodeSeek(_PluginBase):
             last_note = "暂无记录"
 
         # 今日已签到标记
-        today_signed = any(r.get("success") and str(r.get("date") or "")[:10] == today for r in records)
+        today_signed = any(
+            (r.get("success") or r.get("already"))
+            and str(r.get("date") or "")[:10] == today
+            for r in records
+        )
 
         # ---- KPI 卡 ----
         def kpi_card(icon: str, label: str, value: str, value_color: str = "", note: str = "") -> dict:
