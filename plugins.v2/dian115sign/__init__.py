@@ -102,6 +102,9 @@ class Dian115Sign(_PluginBase):
             self._notify = False if self._notify is None else self._notify
             self._retry = config.get("retry")
             self._retry = 3 if self._retry is None else int(self._retry)
+            self._use_system_proxy = config.get("use_system_proxy")
+            self._use_system_proxy = True if self._use_system_proxy is None else bool(self._use_system_proxy)
+            self._proxy = (config.get("proxy") or "").strip()
             self._onlyonce = config.get("onlyonce") or False
 
             # 手动立即运行一次
@@ -121,6 +124,8 @@ class Dian115Sign(_PluginBase):
             "cron": self._cron,
             "notify": self._notify,
             "retry": self._retry,
+            "proxy": getattr(self, "_proxy", ""),
+            "use_system_proxy": getattr(self, "_use_system_proxy", True),
             "onlyonce": self._onlyonce,
         })
 
@@ -212,7 +217,7 @@ class Dian115Sign(_PluginBase):
     # ======================== HTTP 客户端 ========================
 
     def _http(self):
-        """curl_cffi 会话（Chrome 指纹，按版本能力逐级回退）"""
+        """curl_cffi 会话（Chrome 指纹，按版本能力逐级回退；支持可选代理）"""
         if not HAS_CURL_CFFI:
             raise RuntimeError("curl_cffi 未安装，无法模拟浏览器指纹")
         if self._session is None:
@@ -227,7 +232,33 @@ class Dian115Sign(_PluginBase):
                     continue
             if self._session is None:
                 raise RuntimeError(f"curl_cffi 无可用浏览器指纹，请升级 curl_cffi：{last_err}")
+            proxy = (getattr(self, "_proxy", "") or "").strip()
+            if getattr(self, "_use_system_proxy", False):
+                sys_proxy = self._system_proxy()
+                if sys_proxy:
+                    self._session.proxies = {"http": sys_proxy, "https": sys_proxy}
+                    logger.info(f"癫影签到使用系统代理：{sys_proxy}")
+                else:
+                    logger.warning("癫影签到开启了系统代理，但 MoviePilot 未配置代理服务器，将直连")
+            elif proxy:
+                self._session.proxies = {"http": proxy, "https": proxy}
+                logger.info(f"癫影签到走自定义代理：{proxy}")
         return self._session
+
+    @staticmethod
+    def _system_proxy() -> str:
+        """读取 MoviePilot 系统设置中的代理（settings.PROXY.host）"""
+        try:
+            from app.core.config import settings
+            proxy_host = getattr(getattr(settings, "PROXY", None), "host", None)
+            if proxy_host:
+                return str(proxy_host).strip()
+        except Exception as e:
+            logger.debug(f"癫影读取系统代理失败：{e}")
+        # 兜底：容器环境变量
+        import os
+        return (os.environ.get("PROXY_HOST") or os.environ.get("https_proxy") or
+                os.environ.get("HTTPS_PROXY") or "").split(",")[0].strip() or ""
 
     def _base_headers(self) -> dict:
         headers = {

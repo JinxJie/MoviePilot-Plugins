@@ -88,6 +88,13 @@ def build_form() -> Tuple[List[dict], Dict[str, Any]]:
                                           placeholder="30 9 * * *",
                                           hint="Cron 表达式，默认每天 09:30", persistent_hint=True)),
                     ]),
+                    row([
+                        col(12, textfield("proxy", "🌐 自定义代理（可选）",
+                                           placeholder="http://10.0.0.2:7890",
+                                           hint="站点被 WAF 拦截（403）时填写代理地址，让签到流量换个出口 IP；留空则直连", persistent_hint=True, clearable=True)),
+                        col(12, switch("use_system_proxy", "🖥️ 使用系统代理", "info",
+                                        hint="使用 MoviePilot 设置 → 系统 → 代理服务器 中配置的代理；开启后忽略上方自定义代理", persistent_hint=True)),
+                    ]),
                 ]),
 
                 # ── 调试 ──
@@ -110,5 +117,7 @@ def build_form() -> Tuple[List[dict], Dict[str, Any]]:
         "cron": "30 9 * * *",
         "retry": 3,
         "notify": True,
+        "proxy": "",
+        "use_system_proxy": True,
         "onlyonce": False,
     }
