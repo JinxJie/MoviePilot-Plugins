@@ -968,7 +968,7 @@ class HHLottery(_PluginBase):
                     consecutive_throttle += 1
                     consecutive_errors = 0
                     self._quick_retry_ms = 300
-                    logger.warning(f"⚠️ 被限流（第 {consecutive_throttle} 次），300ms 后补枪")
+                    logger.warning("⚠️ 站点冷却，300ms 后重试")
                     continue
 
                 if ret != 0 and ret != "0":
@@ -1173,11 +1173,6 @@ class HHLottery(_PluginBase):
             duration = 0
         self._last_draw_sent_at = sent_at
         self._last_duration_ms = duration if 0 < duration <= 300000 else 0
-        if self._last_duration_ms:
-            logger.info(f"⏱️ 自适应冷却：{self._last_duration_ms}ms（从请求发出时计时）")
-        else:
-            # duration 缺失时静默回退到配置间隔，避免每一抽刷屏
-            pass
 
     def _do_draw(self) -> Optional[dict]:
         """
