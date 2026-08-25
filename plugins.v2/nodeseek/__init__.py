@@ -248,28 +248,21 @@ class NodeSeek(_PluginBase):
         # ---- KPI 卡 ----
         def kpi_card(icon: str, label: str, value: str, value_color: str = "", note: str = "") -> dict:
             value_cls = f"text-h6 font-weight-bold text-{value_color}" if value_color else "text-h6 font-weight-bold"
-            value_props = {
-                "class": value_cls,
-                "style": "font-size: clamp(0.78rem, 3.8vw, 1.25rem); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: normal; overflow-wrap: anywhere; line-height: 1.25;",
-            }
-            right = [
-                {"component": "span", "props": {"class": "text-caption text-medium-emphasis"}, "text": label},
-                {"component": "div", "props": {"class": "d-flex align-center flex-wrap"}, "content": [
-                    {"component": "span", "props": value_props, "text": value},
-                ]},
+            children = [
+                {"component": "div", "props": {"class": "text-h5 mb-1"}, "text": icon},
+                {"component": "span", "props": {
+                    "class": value_cls,
+                    "style": "display:block; font-size: clamp(0.8rem, 3.8vw, 1.25rem); white-space: normal; overflow-wrap: anywhere; word-break: break-all; line-height: 1.2;",
+                }, "text": value},
+                {"component": "span", "props": {"class": "text-caption text-medium-emphasis d-block mt-1"}, "text": label},
             ]
             if note:
-                right.append({"component": "div", "props": {"class": "text-caption text-medium-emphasis", "style": "max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"}, "text": note})
+                children.append({"component": "div", "props": {"class": "text-caption text-medium-emphasis", "style": "white-space: normal; overflow-wrap: anywhere;"}, "text": note})
             return {
                 "component": "VCard",
                 "props": {"variant": "flat", "elevation": 2, "class": "h-100 rounded-lg"},
                 "content": [
-                    {"component": "VCardText", "props": {"class": "d-flex align-center"}, "content": [
-                        {"component": "VAvatar", "props": {"rounded": True, "variant": "tonal", "color": "primary", "size": "x-large", "class": "me-3 flex-shrink-0"}, "content": [
-                            {"component": "span", "props": {"style": "font-size: 2.25rem; line-height: 1;"}, "text": icon},
-                        ]},
-                        {"component": "div", "props": {"class": "flex-grow-1", "style": "min-width: 0;"}, "content": right},
-                    ]},
+                    {"component": "VCardText", "props": {"class": "text-center pa-3"}, "content": children},
                 ],
             }
 
@@ -321,13 +314,8 @@ class NodeSeek(_PluginBase):
                         "component": "VCol", "props": {"cols": 12}, "content": [
                             {
                                 "component": "VCard", "props": {"variant": "flat", "elevation": 2, "class": "h-100 rounded-lg"}, "content": [
-                                    {"component": "VCardItem", "props": {"class": "pb-1"}, "content": [
-                                        {"component": "template", "props": {"v-slot:prepend": True}, "content": [
-                                            {"component": "VAvatar", "props": {"color": "primary", "variant": "tonal", "rounded": "lg"}, "content": [{"component": "span", "props": {"style": "font-size: 1.35rem"}, "text": "🗓️"}]}
-                                        ]},
-                                        {"component": "VCardTitle", "text": "签到概况"},
-                                        {"component": "VCardSubtitle", "text": "持续记录每一次签到结果与收益"},
-                                    ]},
+                                    {"component": "VCardTitle", "text": "🗓️ 签到概况"},
+                                    {"component": "VCardSubtitle", "text": "持续记录每一次签到结果与收益"},
                                     {"component": "VCardText", "props": {"class": "pa-2"}, "content": [
                                         {"component": "VRow", "props": {"dense": True}, "content": [
                                             {"component": "VCol", "props": {"cols": 6}, "content": [
@@ -359,11 +347,8 @@ class NodeSeek(_PluginBase):
                         "component": "VCol", "props": {"cols": 12}, "content": [
                             {
                                 "component": "VCard", "props": {"variant": "flat", "elevation": 2, "class": "rounded-lg"}, "content": [
-                                    {"component": "VCardItem", "props": {"class": "pb-1"}, "content": [
-                                        {"component": "VAvatar", "props": {"color": "warning", "variant": "tonal", "rounded": "lg"}, "content": [{"component": "span", "props": {"style": "font-size: 1.35rem"}, "text": "📋"}]},
-                                        {"component": "VCardTitle", "text": "签到记录"},
-                                        {"component": "VCardSubtitle", "text": "最近 12 次运行明细"},
-                                    ]},
+                                    {"component": "VCardTitle", "text": "📋 签到记录"},
+                                    {"component": "VCardSubtitle", "text": "最近 12 次运行明细"},
                                     {"component": "VCardText", "props": {"class": "pa-0 overflow-x-auto"}, "content": [run_table]},
                                 ]
                             }
