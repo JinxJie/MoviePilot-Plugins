@@ -513,7 +513,11 @@ class Dian115Sign(_PluginBase):
 
     def _sign_job(self, manual: bool = False):
         """定时签到任务入口"""
-        if not self.get_state():
+        if not self._token:
+            logger.warning("癫影签到：未配置 Token，无法执行签到")
+            return
+        # 手动测试仅需 Token；定时计划才要求「启用插件」开关
+        if not manual and not self._enabled:
             return
         logger.info(f"癫影自动签到开始（{'手动' if manual else '定时'}），模式：{'运气签' if self._mode == self.SIGN_MODE_LUCKY else '普通签'}")
 
