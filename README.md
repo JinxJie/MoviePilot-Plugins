@@ -11,7 +11,7 @@ JinxJie 的 [MoviePilot](https://github.com/jxxghp/MoviePilot) 第三方插件�
 | HHCLUB 自动抽奖 | [`plugins.v2/hhlottery`](plugins.v2/hhlottery) | 1.0.8 | 定时自动抽奖、大奖即时通知、盈亏统计、站内信清理 |
 | NodeSeek 自动签到 | [`plugins.v2/nodeseek`](plugins.v2/nodeseek) | 1.0.1 | NodeSeek 论坛每日自动签到、鸡腿收益统计、消息通知 |
 | 插件残留清理 | [`plugins.v2/pluginresidueclean`](plugins.v2/pluginresidueclean) | 1.0.1 | 风险分级、单项清理、清理后复扫、定时扫描通知，默认不自动删除 |
-| 癫影自动签到 | [`plugins.v2/dian115sign`](plugins.v2/dian115sign) | 1.0.0 | 癫影每日自动签到、普通签/运气签开关、积分与连续签到统计、结果通知 |
+| 癫影自动签到 | [`plugins.v2/dian115sign`](plugins.v2/dian115sign) | 1.0.1 | 癫影每日自动签到、普通签/运气签开关、积分与连续签到统计、结果通知 |
 
 ## 📖 使用说明
 
@@ -153,7 +153,7 @@ NodeSeek 论坛每日自动签到，使用 curl_cffi 模拟 Chrome 浏览器指�
 <details>
 <summary>4. 📅 癫影自动签到（Dian115Sign）</summary>
 
-**v1.0.0 · 签到自动化 · 癫影（dian115.com）**
+**v1.0.1 · 签到自动化 · 癫影（dian115.com）**
 
 **功能：**
 癫影每日自动签到，支持普通签/运气签模式开关、连续签到与积分统计、签到历史记录和消息通知。使用 curl_cffi 模拟 Chrome 指纹通过站点 WAF，并以 ECDSA P-256 动态密钥完成请求签名。
@@ -164,7 +164,7 @@ NodeSeek 论坛每日自动签到，使用 curl_cffi 模拟 Chrome 浏览器指�
 **特点：**
 - 📅 支持 Cron 定时自动签到（默认每天 09:30，可自定义）
 - 🎲 运气签模式开关：开 = 运气签（49% 得 3~10 倍 / 10% 平手 / 20% 空签 / 21% 倒霉扣分）；关 = 普通签固定积分
-- 🛡️ 使用 curl_cffi Chrome 124 指纹通过站点 WAF 防护
+- 🛡️ 使用 curl_cffi Chrome 110+ 指纹通过站点 WAF 防护
 - 🔐 ECDSA P-256 动态密钥 + browser-session 注册 + portal-browser-request/v1 请求签名
 - 👤 插件页面展示账号信息：昵称、邮箱、当前积分、连续签到天数
 - 🧧 获得积分、倍率档位（大奖/平手/空签/倒霉）、余额与连签统计
@@ -183,6 +183,7 @@ NodeSeek 论坛每日自动签到，使用 curl_cffi 模拟 Chrome 浏览器指�
 本插件仅通过站点现有接口执行签到操作，不会修改任何站点数据。站点规则、接口或防护策略变更可能导致功能异常或账号相关风险，请自行评估后使用；因使用本插件产生的任何问题，开发者不承担责任。
 
 **更新说明：**
+- v1.0.1：修复浏览器指纹回退链（chrome110 优先）；Token 兼容整段 Cookie 粘贴；手动测试不再被启用开关拦截；图标改为 GitHub CDN 地址；新增系统代理开关（默认开）。
 - v1.0.0：首发版本，支持每日定时自动签到、普通签/运气签开关、Chrome 指纹过 WAF、ECDSA 请求签名、账号信息展示、签到记录、结果通知与失败重试。
 
 </details>
