@@ -75,8 +75,10 @@ class Dian115Sign(_PluginBase):
     # browser-session 有效期（秒），提前 5 分钟刷新
     SESSION_TTL_MARGIN = 300
 
-    # curl_cffi 浏览器指纹回退链（老版本 curl_cffi 不支持新目标，逐级回退）
-    IMPERSONATE_CHAIN = ["chrome124", "chrome120", "chrome116", "chrome110", "chrome107", "chrome99", "chrome"]
+    # curl_cffi 浏览器指纹回退链：
+    # 从各版本都原生支持的老目标开始（0.5.x 只有 chrome99~110/edge/safari；
+    # 新版虽有 chrome124+ 但老 libcurl 实现的 TLS 细节可能被 WAF 识别）
+    IMPERSONATE_CHAIN = ["chrome110", "chrome107", "chrome104", "chrome101", "chrome99", "edge101", "safari15_5", "chrome124"]
 
     def __init__(self):
         super().__init__()
@@ -93,7 +95,7 @@ class Dian115Sign(_PluginBase):
     def init_plugin(self, config: dict = None):
         if config:
             self._enabled = config.get("enabled") or False
-            self._token = (config.get("token") or "").strip()
+            self._token = self._extract_token((config.get("token") or "").strip())
             self._lucky_mode = bool(config.get("lucky_mode"))
             self._cron = config.get("cron") or "30 9 * * *"
             self._notify = config.get("notify")
@@ -125,6 +127,18 @@ class Dian115Sign(_PluginBase):
     @property
     def _mode(self) -> str:
         return self.SIGN_MODE_LUCKY if getattr(self, "_lucky_mode", False) else self.SIGN_MODE_NORMAL
+
+    @staticmethod
+    def _extract_token(raw: str) -> str:
+        """兼容整段 Cookie 或纯 token 值，自动提取 __Host-portal_token"""
+        if not raw:
+            return ""
+        if "eyJ" in raw and "__Host-portal_token=" in raw:
+            for part in raw.split(";"):
+                part = part.strip()
+                if part.startswith("__Host-portal_token="):
+                    return part.split("=", 1)[1].strip()
+        return raw
 
     def get_state(self) -> bool:
         return bool(self._enabled and self._token)
