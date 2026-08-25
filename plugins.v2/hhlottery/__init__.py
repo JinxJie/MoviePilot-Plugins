@@ -423,16 +423,24 @@ class HHLottery(_PluginBase):
             # KPI 数值在手机两列卡片中可缩小，长盈亏数字不换行、不溢出
             value_props = {
                 "class": value_cls,
-                "style": "font-size: clamp(0.8rem, 3.8vw, 1.25rem); white-space: nowrap; line-height: 1.2;",
+                "style": "font-size: clamp(0.72rem, 3.4vw, 1.25rem); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; line-height: 1.2;",
+            }
+            label_props = {
+                "class": "text-caption text-medium-emphasis",
+                "style": "font-size: clamp(0.62rem, 2.8vw, 0.8rem); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;",
+            }
+            note_props = {
+                "class": "text-caption text-medium-emphasis",
+                "style": "font-size: clamp(0.58rem, 2.5vw, 0.75rem); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;",
             }
             right = [
-                {"component": "span", "props": {"class": "text-caption text-medium-emphasis"}, "text": label},
-                {"component": "div", "props": {"class": "d-flex align-center flex-wrap"}, "content": [
+                {"component": "span", "props": label_props, "text": label},
+                {"component": "div", "props": {"class": "d-flex align-center", "style": "min-width: 0; max-width: 100%;"}, "content": [
                     {"component": "span", "props": value_props, "text": value},
                 ]},
             ]
             if note:
-                right.append({"component": "div", "props": {"class": "text-caption text-medium-emphasis"}, "text": note})
+                right.append({"component": "div", "props": note_props, "text": note})
             return {
                 "component": "VCard",
                 "props": {"variant": "tonal", "class": "h-100"},
@@ -735,7 +743,7 @@ class HHLottery(_PluginBase):
                                         kpi_card("📊", "总盈亏", f"{total_pnl:+,}", pnl_color(total_pnl), f"盈亏率 {total_rate:+.1f}%"),
                                     ]},
                                 ]},
-                                {"component": "div", "props": {"class": "text-caption text-medium-emphasis mt-2"},
+                                {"component": "div", "props": {"class": "text-caption text-medium-emphasis mt-2", "style": "font-size: clamp(0.58rem, 2.5vw, 0.75rem); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;"},
                                  "text": f"🕐 最近运行：{last_time}　{last_stop_reason or ''}"},
                             ]},
                         ]}
