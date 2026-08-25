@@ -464,7 +464,20 @@ class HHLottery(_PluginBase):
             ]
 
             def _cell(icon: str, label: str, value: str, unit: str) -> dict:
-                return kpi_card(icon, label, f"{value} {unit}")
+                # 奖品总览采用紧凑排版：图标+名称一行，数值单位下一行
+                return {
+                    "component": "VCard",
+                    "props": {"variant": "tonal", "class": "h-100"},
+                    "content": [
+                        {"component": "VCardText", "props": {"class": "pa-2", "style": "min-width: 0;"}, "content": [
+                            {"component": "div", "props": {"class": "d-flex align-center", "style": "min-width: 0; white-space: nowrap;"}, "content": [
+                                {"component": "span", "props": {"style": "font-size: clamp(0.9rem, 2.2vw, 1.35rem); line-height: 1; flex-shrink: 0;"}, "text": icon},
+                                {"component": "span", "props": {"class": "font-weight-bold ms-1", "style": "font-size: clamp(0.62rem, 1.25vw, 0.9rem); overflow: hidden; text-overflow: ellipsis;"}, "text": label},
+                            ]},
+                            {"component": "div", "props": {"class": "font-weight-bold mt-1", "style": "font-size: clamp(0.68rem, 1.5vw, 1rem); line-height: 1.15; overflow-wrap: anywhere; word-break: break-word;"}, "text": f"{value} {unit}"},
+                        ]},
+                    ],
+                }
 
             rows = [
                 {"component": "VRow", "props": {"dense": True}, "content": [
