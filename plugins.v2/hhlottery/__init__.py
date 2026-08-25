@@ -469,12 +469,12 @@ class HHLottery(_PluginBase):
                     "component": "VCard",
                     "props": {"variant": "tonal", "class": "h-100"},
                     "content": [
-                        {"component": "VCardText", "props": {"class": "pa-2", "style": "min-width: 0;"}, "content": [
-                            {"component": "div", "props": {"class": "d-flex align-center", "style": "min-width: 0; white-space: nowrap;"}, "content": [
+                        {"component": "VCardText", "props": {"class": "pa-2 d-flex flex-column align-center justify-center text-center", "style": "min-width: 0;"}, "content": [
+                            {"component": "div", "props": {"class": "d-flex align-center justify-center", "style": "min-width: 0; max-width: 100%; white-space: nowrap;"}, "content": [
                                 {"component": "span", "props": {"style": "font-size: clamp(0.9rem, 2.2vw, 1.35rem); line-height: 1; flex-shrink: 0;"}, "text": icon},
                                 {"component": "span", "props": {"class": "font-weight-bold ms-1", "style": "font-size: clamp(0.62rem, 1.25vw, 0.9rem); overflow: hidden; text-overflow: ellipsis;"}, "text": label},
                             ]},
-                            {"component": "div", "props": {"class": "font-weight-bold mt-1", "style": "font-size: clamp(0.68rem, 1.5vw, 1rem); line-height: 1.15; overflow-wrap: anywhere; word-break: break-word;"}, "text": f"{value} {unit}"},
+                            {"component": "div", "props": {"class": "font-weight-bold mt-1 text-center", "style": "font-size: clamp(0.68rem, 1.5vw, 1rem); line-height: 1.15; overflow-wrap: anywhere; word-break: break-word; max-width: 100%;"}, "text": f"{value} {unit}"},
                         ]},
                     ],
                 }
