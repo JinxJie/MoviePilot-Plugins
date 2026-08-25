@@ -420,37 +420,35 @@ class HHLottery(_PluginBase):
         # KPI 卡：图标头像 + 标签 + 大数值（借鉴站点数据统计插件）
         def kpi_card(icon: str, label: str, value: str, value_color: str = "", note: str = "") -> dict:
             value_cls = f"text-h6 font-weight-bold text-{value_color}" if value_color else "text-h6 font-weight-bold"
-            # KPI 数值在手机两列卡片中可缩小，长盈亏数字不换行、不溢出
+            # 数值必须完整显示：不省略、不裁切；字号按卡片宽度自适应
             value_props = {
                 "class": value_cls,
-                "style": "font-size: clamp(0.72rem, 3.4vw, 1.25rem); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; line-height: 1.2;",
+                "style": "font-size: clamp(0.62rem, 3.1vw, 1.25rem); white-space: normal; overflow-wrap: anywhere; line-height: 1.2;",
             }
             label_props = {
                 "class": "text-caption text-medium-emphasis",
-                "style": "font-size: clamp(0.62rem, 2.8vw, 0.8rem); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;",
+                "style": "font-size: clamp(0.58rem, 2.6vw, 0.8rem); white-space: normal; overflow-wrap: anywhere; line-height: 1.15;",
             }
             note_props = {
                 "class": "text-caption text-medium-emphasis",
-                "style": "font-size: clamp(0.58rem, 2.5vw, 0.75rem); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;",
+                "style": "font-size: clamp(0.54rem, 2.3vw, 0.75rem); white-space: normal; overflow-wrap: anywhere; line-height: 1.15;",
             }
             right = [
-                {"component": "span", "props": label_props, "text": label},
-                {"component": "div", "props": {"class": "d-flex align-center", "style": "min-width: 0; max-width: 100%;"}, "content": [
-                    {"component": "span", "props": value_props, "text": value},
+                {"component": "div", "props": {"class": "d-flex align-center", "style": "min-width: 0; width: 100%;"}, "content": [
+                    {"component": "span", "props": {"style": "font-size: clamp(1rem, 5vw, 2.25rem); line-height: 1; flex: 0 1 auto;"}, "text": icon},
+                    {"component": "div", "props": {"style": "min-width: 0; flex: 1 1 auto;"}, "content": [
+                        {"component": "div", "props": label_props, "text": label},
+                        {"component": "div", "props": value_props, "text": value},
+                    ]},
                 ]},
             ]
             if note:
-                right.append({"component": "div", "props": note_props, "text": note})
+                right.append({"component": "div", "props": {"class": "text-caption text-medium-emphasis", "style": "font-size: clamp(0.54rem, 2.3vw, 0.75rem); white-space: normal; overflow-wrap: anywhere; line-height: 1.15;"}, "text": note})
             return {
                 "component": "VCard",
                 "props": {"variant": "tonal", "class": "h-100"},
                 "content": [
-                    {"component": "VCardText", "props": {"class": "d-flex align-center"}, "content": [
-                        {"component": "VAvatar", "props": {"rounded": True, "variant": "tonal", "color": "primary", "size": "x-large", "class": "me-3 flex-shrink-0"}, "content": [
-                            {"component": "span", "props": {"style": "font-size: 2.25rem; line-height: 1;"}, "text": icon},
-                        ]},
-                        {"component": "div", "props": {"class": "flex-grow-1", "style": "min-width: 0;"}, "content": right},
-                    ]},
+                    {"component": "div", "props": {"class": "d-flex align-center", "style": "min-width: 0; width: 100%;"}, "content": right},
                 ],
             }
 
