@@ -47,5 +47,18 @@
       "v1.0.1": "增加风险分级、单插件清理、清理后复扫和更详细的清理结果",
       "v1.0.0": "首发版本：一键清理卸载残留、手动扫描、定时扫描通知、安全排除"
     }
+  },
+  "Dian115Sign": {
+    "name": "癫影自动签到",
+    "description": "癫影每日自动签到，支持普通签/运气签模式开关、连续签到与积分统计、签到记录、结果通知与失败重试。",
+    "labels": "签到,自动化,积分",
+    "version": "1.0.0",
+    "icon": "https://raw.githubusercontent.com/JinxJie/MoviePilot-Plugins/main/icons/dian115sign.png",
+    "author": "JinxJie",
+    "level": 2,
+    "release": false,
+    "history": {
+      "v1.0.0": "首发版本：每日定时自动签到、普通签/运气签开关、Chrome 指纹过 WAF、ECDSA 请求签名、账号信息展示、签到记录、结果通知与失败重试"
+    }
   }
 }
