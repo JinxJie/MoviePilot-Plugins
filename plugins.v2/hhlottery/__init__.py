@@ -717,7 +717,7 @@ class HHLottery(_PluginBase):
             {
                 "component": "VRow",
                 "content": [
-                    {"component": "VCol", "props": {"cols": 12, "md": 6}, "content": [
+                    {"component": "VCol", "props": {"cols": 12}, "content": [
                         {"component": "VCard", "props": {"variant": "tonal", "color": "primary", "class": "h-100"}, "content": [
                             {"component": "VCardTitle", "text": "🎰 我的抽奖信息"},
                             {"component": "VCardText", "props": {"class": "pa-2"}, "content": [
@@ -740,7 +740,7 @@ class HHLottery(_PluginBase):
                             ]},
                         ]}
                     ]},
-                    {"component": "VCol", "props": {"cols": 12, "md": 6}, "content": [
+                    {"component": "VCol", "props": {"cols": 12}, "content": [
                         prize_overview_card("🏆 奖品总览", history_metrics, history_groups)
                     ]},
                 ],
