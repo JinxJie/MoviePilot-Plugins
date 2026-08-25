@@ -75,6 +75,9 @@ class Dian115Sign(_PluginBase):
     # browser-session 有效期（秒），提前 5 分钟刷新
     SESSION_TTL_MARGIN = 300
 
+    # curl_cffi 浏览器指纹回退链（老版本 curl_cffi 不支持新目标，逐级回退）
+    IMPERSONATE_CHAIN = ["chrome124", "chrome120", "chrome116", "chrome110", "chrome107", "chrome99", "chrome"]
+
     def __init__(self):
         super().__init__()
         self._session = None
@@ -195,11 +198,21 @@ class Dian115Sign(_PluginBase):
     # ======================== HTTP 客户端 ========================
 
     def _http(self):
-        """curl_cffi 会话（Chrome 指纹）"""
+        """curl_cffi 会话（Chrome 指纹，按版本能力逐级回退）"""
         if not HAS_CURL_CFFI:
             raise RuntimeError("curl_cffi 未安装，无法模拟浏览器指纹")
         if self._session is None:
-            self._session = curl_requests.Session(impersonate="chrome124")
+            last_err = None
+            for target in self.IMPERSONATE_CHAIN:
+                try:
+                    self._session = curl_requests.Session(impersonate=target)
+                    logger.info(f"癫影签到使用浏览器指纹：{target}")
+                    break
+                except Exception as e:
+                    last_err = e
+                    continue
+            if self._session is None:
+                raise RuntimeError(f"curl_cffi 无可用浏览器指纹，请升级 curl_cffi：{last_err}")
         return self._session
 
     def _base_headers(self) -> dict:
