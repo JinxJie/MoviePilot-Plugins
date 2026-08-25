@@ -417,32 +417,24 @@ class HHLottery(_PluginBase):
         last_time = str(last_record.get("time") or "—") if last_record else "—"
         last_stop_reason = str(last_record.get("stop_reason") or "") if last_record else ""
 
-        # KPI 卡：图标头像 + 标签 + 大数值（借鉴站点数据统计插件）
+        # KPI 卡：居中图标 + 大数值 + 标签（Lite 不支持 VAvatar，改用 span）
         def kpi_card(icon: str, label: str, value: str, value_color: str = "", note: str = "") -> dict:
             value_cls = f"text-h6 font-weight-bold text-{value_color}" if value_color else "text-h6 font-weight-bold"
-            # 保持原卡片排版；数值不隐藏、不省略，允许完整换行
-            value_props = {
-                "class": value_cls,
-                "style": "font-size: clamp(0.8rem, 3.8vw, 1.25rem); white-space: normal; overflow-wrap: anywhere; word-break: break-all; line-height: 1.2;",
-            }
-            right = [
-                {"component": "span", "props": {"class": "text-caption text-medium-emphasis"}, "text": label},
-                {"component": "div", "props": {"class": "d-flex align-center flex-wrap"}, "content": [
-                    {"component": "span", "props": value_props, "text": value},
-                ]},
+            children = [
+                {"component": "div", "props": {"class": "text-h5 mb-1"}, "text": icon},
+                {"component": "span", "props": {
+                    "class": value_cls,
+                    "style": "display:block; font-size: clamp(0.8rem, 3.8vw, 1.25rem); white-space: normal; overflow-wrap: anywhere; word-break: break-all; line-height: 1.2;",
+                }, "text": value},
+                {"component": "span", "props": {"class": "text-caption text-medium-emphasis d-block mt-1"}, "text": label},
             ]
             if note:
-                right.append({"component": "div", "props": {"class": "text-caption text-medium-emphasis"}, "text": note})
+                children.append({"component": "div", "props": {"class": "text-caption text-medium-emphasis"}, "text": note})
             return {
                 "component": "VCard",
                 "props": {"variant": "tonal", "class": "h-100"},
                 "content": [
-                    {"component": "VCardText", "props": {"class": "d-flex align-center"}, "content": [
-                        {"component": "VAvatar", "props": {"rounded": True, "variant": "tonal", "color": "primary", "size": "x-large", "class": "me-3 flex-shrink-0"}, "content": [
-                            {"component": "span", "props": {"style": "font-size: 2.25rem; line-height: 1;"}, "text": icon},
-                        ]},
-                        {"component": "div", "props": {"class": "flex-grow-1", "style": "min-width: 0;"}, "content": right},
-                    ]},
+                    {"component": "VCardText", "props": {"class": "text-center pa-3"}, "content": children},
                 ],
             }
 
@@ -481,7 +473,7 @@ class HHLottery(_PluginBase):
 
             rows = [
                 {"component": "VRow", "props": {"dense": True}, "content": [
-                    {"component": "VCol", "props": {"cols": 6, "md": 2}, "content": [_cell(*it)]} for it in items
+                    {"component": "VCol", "props": {"cols": 4, "md": 2}, "content": [_cell(*it)]} for it in items
                 ]},
             ]
 
@@ -735,16 +727,16 @@ class HHLottery(_PluginBase):
                             {"component": "VCardTitle", "text": "🎰 我的抽奖信息"},
                             {"component": "VCardText", "props": {"class": "pa-2"}, "content": [
                                 {"component": "VRow", "props": {"dense": True}, "content": [
-                                    {"component": "VCol", "props": {"cols": 12, "md": 3}, "content": [
+                                    {"component": "VCol", "props": {"cols": 6, "md": 3}, "content": [
                                         kpi_card("💰", "当前憨豆", f"{last_balance:,}", "info", f"截至 {last_time}"),
                                     ]},
-                                    {"component": "VCol", "props": {"cols": 12, "md": 3}, "content": [
+                                    {"component": "VCol", "props": {"cols": 6, "md": 3}, "content": [
                                         kpi_card("🎲", "总抽奖数", f"{total_count:,}", "", "历史以来累计"),
                                     ]},
-                                    {"component": "VCol", "props": {"cols": 12, "md": 3}, "content": [
+                                    {"component": "VCol", "props": {"cols": 6, "md": 3}, "content": [
                                         kpi_card("📈", "今日盈亏", f"{today_pnl:+,}", pnl_color(today_pnl), f"盈亏率 {today_rate:+.1f}%"),
                                     ]},
-                                    {"component": "VCol", "props": {"cols": 12, "md": 3}, "content": [
+                                    {"component": "VCol", "props": {"cols": 6, "md": 3}, "content": [
                                         kpi_card("📊", "总盈亏", f"{total_pnl:+,}", pnl_color(total_pnl), f"盈亏率 {total_rate:+.1f}%"),
                                     ]},
                                 ]},

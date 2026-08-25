@@ -644,28 +644,21 @@ class Dian115Sign(_PluginBase):
 
         def kpi(icon: str, label: str, value: str, color: str = "", note: str = "") -> dict:
             value_cls = f"text-h6 font-weight-bold text-{color}" if color else "text-h6 font-weight-bold"
-            value_props = {
-                "class": value_cls,
-                "style": "font-size: clamp(0.8rem, 3.8vw, 1.25rem); white-space: normal; overflow-wrap: anywhere; word-break: break-all; line-height: 1.2;",
-            }
-            right = [
-                {"component": "span", "props": {"class": "text-caption text-medium-emphasis"}, "text": label},
-                {"component": "div", "props": {"class": "d-flex align-center flex-wrap"}, "content": [
-                    {"component": "span", "props": value_props, "text": value},
-                ]},
+            children = [
+                {"component": "div", "props": {"class": "text-h5 mb-1"}, "text": icon},
+                {"component": "span", "props": {
+                    "class": value_cls,
+                    "style": "display:block; font-size: clamp(0.8rem, 3.8vw, 1.25rem); white-space: normal; overflow-wrap: anywhere; word-break: break-all; line-height: 1.2;",
+                }, "text": value},
+                {"component": "span", "props": {"class": "text-caption text-medium-emphasis d-block mt-1"}, "text": label},
             ]
             if note:
-                right.append({"component": "div", "props": {"class": "text-caption text-medium-emphasis"}, "text": note})
+                children.append({"component": "div", "props": {"class": "text-caption text-medium-emphasis"}, "text": note})
             return {
                 "component": "VCard",
                 "props": {"variant": "tonal", "class": "h-100"},
                 "content": [
-                    {"component": "VCardText", "props": {"class": "d-flex align-center"}, "content": [
-                        {"component": "VAvatar", "props": {"rounded": True, "variant": "tonal", "color": "primary", "size": "x-large", "class": "me-3 flex-shrink-0"}, "content": [
-                            {"component": "span", "props": {"style": "font-size: 2.25rem; line-height: 1;"}, "text": icon},
-                        ]},
-                        {"component": "div", "props": {"class": "flex-grow-1", "style": "min-width: 0;"}, "content": right},
-                    ]},
+                    {"component": "VCardText", "props": {"class": "text-center pa-3"}, "content": children},
                 ],
             }
 
@@ -681,10 +674,10 @@ class Dian115Sign(_PluginBase):
                 "component": "VRow",
                 "props": {"dense": True},
                 "content": [
-                    {"component": "VCol", "props": {"cols": 12, "md": 6}, "content": [kpi(*kpis[0])]},
-                    {"component": "VCol", "props": {"cols": 12, "md": 6}, "content": [kpi(*kpis[1])]},
-                    {"component": "VCol", "props": {"cols": 12, "md": 6}, "content": [kpi(*kpis[2])]},
-                    {"component": "VCol", "props": {"cols": 12, "md": 6}, "content": [kpi(*kpis[3])]},
+                    {"component": "VCol", "props": {"cols": 6, "md": 6}, "content": [kpi(*kpis[0])]},
+                    {"component": "VCol", "props": {"cols": 6, "md": 6}, "content": [kpi(*kpis[1])]},
+                    {"component": "VCol", "props": {"cols": 6, "md": 6}, "content": [kpi(*kpis[2])]},
+                    {"component": "VCol", "props": {"cols": 6, "md": 6}, "content": [kpi(*kpis[3])]},
                 ],
             },
         ]

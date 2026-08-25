@@ -618,7 +618,6 @@ class PluginResidueClean(_PluginBase):
                                                 {"component": "span", "text": f"{progress_text}{('：' + progress_current) if progress_current else ''}"},
                                                 {"component": "span", "text": f"{progress_percent}%（{progress.get('done', 0)}/{progress.get('total', 0)}）"},
                                             ]},
-                                            {"component": "VProgressLinear", "props": {"model-value": progress_percent, "color": "info" if progress.get("running") else "success", "height": 8, "rounded": True}},
                                         ],
                                     },
                                     {
