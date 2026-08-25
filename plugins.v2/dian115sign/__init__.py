@@ -50,7 +50,7 @@ class Dian115Sign(_PluginBase):
     plugin_name = "癫影自动签到"
     plugin_desc = "癫影每日自动签到 · 普通签/运气签模式开关 · 连续签到与积分统计 · 签到记录 · 结果通知 · 失败重试"
     plugin_icon = "https://raw.githubusercontent.com/JinxJie/MoviePilot-Plugins/main/icons/dian115sign.png"
-    plugin_version = "1.0.0"
+    plugin_version = "1.0.1"
     plugin_author = "JinxJie"
     author_url = "https://github.com/JinxJie"
     plugin_config_prefix = "dian115sign_"

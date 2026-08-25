@@ -56,7 +56,7 @@
     "icon": "https://raw.githubusercontent.com/JinxJie/MoviePilot-Plugins/main/icons/dian115sign.png",
     "author": "JinxJie",
     "level": 2,
-    "release": true,
+    "release": false,
     "history": {
       "v1.0.1": "修复浏览器指纹回退链（chrome110 优先）；Token 兼容整段 Cookie 粘贴；手动测试不再被启用开关拦截；图标改为 GitHub CDN 地址；新增系统代理开关（默认开）",
       "v1.0.0": "首发版本：每日定时自动签到、普通签/运气签开关、Chrome 指纹过 WAF、ECDSA 请求签名、账号信息展示、签到记录、结果通知与失败重试"
