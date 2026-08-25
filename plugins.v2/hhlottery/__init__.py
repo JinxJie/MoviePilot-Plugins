@@ -722,16 +722,16 @@ class HHLottery(_PluginBase):
                             {"component": "VCardTitle", "text": "🎰 我的抽奖信息"},
                             {"component": "VCardText", "props": {"class": "pa-2"}, "content": [
                                 {"component": "VRow", "props": {"dense": True}, "content": [
-                                    {"component": "VCol", "props": {"cols": 6}, "content": [
+                                    {"component": "VCol", "props": {"cols": 12, "md": 6}, "content": [
                                         kpi_card("💰", "当前憨豆", f"{last_balance:,}", "info", f"截至 {last_time}"),
                                     ]},
-                                    {"component": "VCol", "props": {"cols": 6}, "content": [
+                                    {"component": "VCol", "props": {"cols": 12, "md": 6}, "content": [
                                         kpi_card("🎲", "总抽奖数", f"{total_count:,}", "", "历史以来累计"),
                                     ]},
-                                    {"component": "VCol", "props": {"cols": 6}, "content": [
+                                    {"component": "VCol", "props": {"cols": 12, "md": 6}, "content": [
                                         kpi_card("📈", "今日盈亏", f"{today_pnl:+,}", pnl_color(today_pnl), f"盈亏率 {today_rate:+.1f}%"),
                                     ]},
-                                    {"component": "VCol", "props": {"cols": 6}, "content": [
+                                    {"component": "VCol", "props": {"cols": 12, "md": 6}, "content": [
                                         kpi_card("📊", "总盈亏", f"{total_pnl:+,}", pnl_color(total_pnl), f"盈亏率 {total_rate:+.1f}%"),
                                     ]},
                                 ]},
