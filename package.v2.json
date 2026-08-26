@@ -61,5 +61,18 @@
       "v1.0.1": "修复浏览器指纹回退链（chrome110 优先）；Token 兼容整段 Cookie 粘贴；手动测试不再被启用开关拦截；图标改为 GitHub CDN 地址；新增系统代理开关（默认开）",
       "v1.0.0": "首发版本：每日定时自动签到、普通签/运气签开关、Chrome 指纹过 WAF、ECDSA 请求签名、账号信息展示、签到记录、结果通知与失败重试"
     }
+  },
+  "BonusMagic": {
+    "name": "NexusPHP 魔力兑换",
+    "description": "读取 MoviePilot 已配置站点，按架构适配器动态解析魔力商店并按策略自动兑换上传/下载量；自适应限速、多站并发、安全熔断。首期 NexusPHP。",
+    "labels": "站点,自动化,魔力",
+    "version": "1.0.0",
+    "icon": "https://raw.githubusercontent.com/JinxJie/MoviePilot-Plugins/main/icons/bonusmagic.png",
+    "author": "JinxJie",
+    "level": 2,
+    "release": false,
+    "history": {
+      "v1.0.0": "首发版本：读取 MoviePilot 站点 Cookie，Adapter 自动识别架构（首期 NexusPHP），动态解析魔力商店，支持固定/最大化/保留余额与分享率优先策略，自适应限速学习、多站点并发、单站串行、安全熔断与任务统计"
+    }
   }
 }
