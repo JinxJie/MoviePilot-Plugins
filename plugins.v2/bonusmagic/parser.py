@@ -159,7 +159,7 @@ def parse_user_stats(html: str) -> Dict[str, Any]:
     }
 
     bonus_pats = [
-        re.compile(r"(?:魔力值|魔力|積分|积分|bonus|karma)\s*[:：]?\s*(" + _NUM + r")", re.I),
+        re.compile(r"(?:魔力值|魔力|積分|积分|bonus|karma)\s*(?:\[[^\]]+\])?\s*[:：]?\s*(" + _NUM + r")", re.I),
         re.compile(r"mybonus[^>]*>\s*(" + _NUM + r")", re.I),
     ]
     for pat in bonus_pats:
@@ -209,6 +209,8 @@ def _extract_cost(text: str) -> Optional[float]:
     pats = [
         re.compile(r"(?:需要|消耗|花费|花費|cost)\s*(" + _NUM + r")\s*(?:魔力|積分|积分|bonus|karma)?", re.I),
         re.compile(r"(" + _NUM + r")\s*(?:魔力值|魔力|積分|积分|bonus)", re.I),
+        # 表格独立价格列：上下文里只有数字，常见于 NexusPHP 兑换页 <td align="center">3,000</td>
+        re.compile(r"(?:价格|price)\s*[:：]?\s*(" + _NUM + r")", re.I),
     ]
     for pat in pats:
         m = pat.search(text)
@@ -216,6 +218,16 @@ def _extract_cost(text: str) -> Optional[float]:
             n = parse_number(m.group(1))
             if n is not None and n > 0:
                 return n
+    # 兜底：上下文里连续出现的数字，取第一个像价格的（>=100）
+    # 优先匹配紧挨在兑换项描述后面的数字，避免序号/年份等干扰
+    for m in re.finditer(r"(?:</h[1-6]>|</font>|</td>|</div>)\s*[:：]?\s*(" + _NUM + r")", text):
+        n = parse_number(m.group(1))
+        if n is not None and n >= 100:
+            return n
+    for m in re.finditer(r"(" + _NUM + r")", text):
+        n = parse_number(m.group(1))
+        if n is not None and n >= 100:
+            return n
     return None
 
 
@@ -326,6 +338,12 @@ def parse_exchange_items(html: str, base_url: str = "") -> List[Dict[str, Any]]:
             if "option" not in body.lower() and "exchange" not in (action + " " + body).lower():
                 continue
             extra = {k: v for k, v in _extract_hidden_fields(body).items() if k.lower() not in ("option",)}
+            # 兼容空 form（如 <form action="?action=exchange" method="post"></form> 后紧跟 td/input）
+            if len(body.strip()) < 80:
+                tr_start = html.rfind("<tr", 0, fm.start())
+                tr_end = html.find("</tr>", fm.end())
+                if tr_start != -1 and tr_end != -1 and (tr_end + 5 - tr_start) < 8000:
+                    body = html[tr_start:tr_end + 5]
             scan_regions.append((body, action, method, extra))
     else:
         scan_regions.append((html, "", "post", {}))

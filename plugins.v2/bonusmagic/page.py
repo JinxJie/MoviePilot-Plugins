@@ -74,8 +74,8 @@ def _btn(text: str, api: str, color: str = "primary", variant: str = "tonal") ->
             "variant": variant,
             "size": "small",
             "class": "ma-1",
-            "text": text,
         },
+        "text": text,
         "events": {"click": {"api": api, "method": "post", "confirm": True}},
     }
 

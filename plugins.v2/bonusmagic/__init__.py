@@ -831,7 +831,9 @@ class BonusMagic(_PluginBase):
             return rec
 
         base = site["url"].rstrip("/") + "/"
-        items = adapter.parse_catalog(catalog_html, base, site)
+        # 保证 base_url 以 mybonus.php 结尾，让 form action="?action=exchange" 正确拼接
+        base_url = urljoin(base, "mybonus.php") + "?action=exchange"
+        items = adapter.parse_catalog(catalog_html, base_url, site)
         if not items:
             rec["status"] = "parse"
             rec["message"] = "解析不到兑换价格，禁止兑换"
@@ -1177,7 +1179,9 @@ class BonusMagic(_PluginBase):
             return rec
 
         base = site["url"].rstrip("/") + "/"
-        items = adapter.parse_catalog(catalog_html, base, site)
+        # 保证 base_url 以 mybonus.php 结尾，让 form action="?action=exchange" 正确拼接
+        base_url = urljoin(base, "mybonus.php") + "?action=exchange"
+        items = adapter.parse_catalog(catalog_html, base_url, site)
         if not items:
             rec["status"] = "parse"
             rec["message"] = "解析不到兑换价格"
