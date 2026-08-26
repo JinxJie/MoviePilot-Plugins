@@ -914,7 +914,7 @@ class BonusMagic(_PluginBase):
                 # 官方 mybonus.php 对每次拒绝都写 modlog（"trying to cheat"），
                 # 重试同样请求必然再拒，必须立即停站避免反复触发风控
                 rec["status"] = "failed"
-                rec["message"] = f"站点拒绝（{result.get('message')}），已停止该站"
+                rec["message"] = f"{result.get('message')}，已停止该站"
                 rec["fail"] += 1
                 log(rec["message"])
                 return rec

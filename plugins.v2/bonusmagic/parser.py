@@ -41,7 +41,8 @@ FAIL_BONUS_HINTS = ("魔力值不足", "魔力不足", "积分不足", "積分�
 FAIL_LIMIT_HINTS = ("过于频繁", "過於頻繁", "频率限制", "操作过快", "稍后再试", "稍後再試", "rate limit")
 ALREADY_HINTS = ("今日已兑换", "已兑换过", "已经兑换", "已兌換過")
 # NexusPHP 官方反作弊 die() 文案（mybonus.php: $_POST 带 userid/points/bonus/art 时）
-REJECT_HINTS = ("想作弊", "没门", "cheat")
+# + 部分站改源码用自定义文案（如 PTzone"反作弊校验"），一并覆盖
+REJECT_HINTS = ("想作弊", "没门", "cheat", "反作弊")
 # 非流量类兑换行（借鉴油猴脚本词库）：含这些词的行不参与上传/下载解析，防止慈善/赠送行误判
 EXCLUDE_ITEM_HINTS = ("捐赠", "捐贈", "赠送", "贈送", "慈善", "gift", "donate", "charity", "invite", "邀请", "邀請")
 
@@ -404,12 +405,18 @@ def _parse_official_table(html: str, base_url: str, seen: set) -> List[Dict[str,
                     break
         submit_m = re.search(r"""<input\b[^>]*type\s*=\s*['"]submit['"][^>]*>""", row, re.I)
         disabled = bool(submit_m and re.search(r"""\bdisabled\b""", submit_m.group(0), re.I))
+        # 转发行内全部隐藏字段（站点可能在官方基础上加自定义 token/校验字段），
+        # 仅剔除官方 mybonus.php 明令禁止的四个：出现即 die("想作弊？没门！")
+        row_hidden = {
+            k: v for k, v in _extract_hidden_fields(row).items()
+            if k.lower() not in ("option", "submit", "userid", "points", "bonus", "art")
+        }
         item = _build_item(
             str(option),
             f"{desc}\n{texts[price_col] if 0 <= price_col < len(texts) else ''}",
             urljoin(base_url, "?action=exchange"),
             "post",
-            {},
+            row_hidden,
             _attr(submit_m.group(0), "value") if submit_m and _attr(submit_m.group(0), "value") else "交换",
             seen,
             cost_override=cost_val,
@@ -533,7 +540,9 @@ def classify_result(html: str, status_code: int = 200) -> Dict[str, Any]:
         return result
     if any(h in low for h in REJECT_HINTS):
         result["code"] = "reject"
-        result["message"] = "站点拒绝（反作弊校验）"
+        # 带上站点原话（官方=想作弊？没门！；部分站自定义如"反作弊校验"），便于区分拒绝原因
+        snippet = re.sub(r"\s+", " ", text).strip()
+        result["message"] = f"站点拒绝（{snippet[:80]}）"
         return result
     # 借鉴 HTTP 兑换脚本的判定：POST 后站点通常直接回渲染魔力页；
     # 已登录 + 返回页仍带兑换表单 + 无任何错误提示 => 视为已受理成功
