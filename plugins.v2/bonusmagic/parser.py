@@ -538,15 +538,39 @@ def classify_result(html: str, status_code: int = 200) -> Dict[str, Any]:
         result["success"] = True
         result["message"] = "兑换成功"
         return result
-    if any(h in low for h in REJECT_HINTS):
-        result["code"] = "reject"
-        # 带上站点原话（官方=想作弊？没门！；部分站自定义如"反作弊校验"），便于区分拒绝原因
-        snippet = re.sub(r"\s+", " ", text).strip()
-        result["message"] = f"站点拒绝（{snippet[:80]}）"
-        return result
+    # 官方 die() 是纯文本小响应（无表格/表单结构）；完整渲染页出现敏感词多为
+    # 导航/FAQ 链接文字（如 <a href="faq.php">反作弊说明</a>），不能据此判失败。
+    # 强短语（官方原话）任何形态都算拒绝；弱短语按出现位置区分。
+    raw = html or ""
+    STRONG_REJECT = ("想作弊", "没门", "trying to cheat", "text_cheat")
+    hit = next((h for h in REJECT_HINTS if h in low), None)
+    if hit:
+        err_positions = []
+        for mm in re.finditer(re.escape(hit), raw, re.I):
+            lt = raw.rfind("<", 0, mm.start())
+            tag_m = re.match(r"<\s*([a-zA-Z0-9]+)", raw[lt:])
+            tagname = tag_m.group(1).lower() if tag_m else ""
+            gt = raw.find(">", lt)
+            close = raw.find(f"</{tagname}", gt) if tagname else -1
+            in_text = close != -1 and mm.start() < close
+            # 位于 <a>...</a> 内 => 站点导航/帮助链接，非报错
+            if tagname == "a" and in_text:
+                continue
+            err_positions.append(mm.start())
+        # 真裸响应：完全无结构标签（官方/自定义 die() 文本）
+        bare = ("<table" not in raw.lower() and "<form" not in raw.lower()
+                and "<div" not in raw.lower())
+        if err_positions or bare or hit in STRONG_REJECT:
+            # ctx 用纯文本定位（err_positions 是 HTML 偏移，不用于切片）
+            pos = text.find(hit)
+            ctx = re.sub(r"\s+", " ", (text[max(0, pos - 20):pos + 60] if pos != -1 else "")).strip()
+            result["code"] = "reject"
+            result["message"] = f"站点拒绝[命中:{hit}]（{ctx[:80]}）"
+            return result
+        # 弱命中且仅在链接文字里 => 不判失败，落入下方受理判定
+        result["message"] += f"（'{hit}'仅见于链接文字，非报错）"
     # 借鉴 HTTP 兑换脚本的判定：POST 后站点通常直接回渲染魔力页；
     # 已登录 + 返回页仍带兑换表单 + 无任何错误提示 => 视为已受理成功
-    raw = html or ""
     if status_code == 200 and result["logged_in"] and re.search(r"""name\s*=\s*['"](?:option|bonusoption)['"]""", raw, re.I):
         result["code"] = "ok"
         result["success"] = True
