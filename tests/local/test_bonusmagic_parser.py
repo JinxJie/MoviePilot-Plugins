@@ -145,7 +145,7 @@ SAMPLE_RADIO = """
 </body></html>
 """
 
-# LongPT 实测结构：空 form + hidden option 在前一个 td + 独立价格列（裸数字）
+# LongPT / NexusPHP 官方标准结构：四列表头（项目|简介|价格|交换）+ 行内空 form
 SAMPLE_LONGPT = """
 <html><head><title>LongPT :: test的魔力值 - Powered by NexusPHP</title></head>
 <body>
@@ -154,26 +154,31 @@ SAMPLE_LONGPT = """
 <font class="color_ratio">分享率:</font> 1.441
 <font class="color_uploaded">上传量:</font> 73.34 GB
 <font class="color_downloaded">下载量:</font> 50.90 GB
-<table>
-<tr><td class="colhead">项目</td><td class="colhead">简介</td><td class="colhead">价格</td><td class="colhead">交换</td></tr>
+<table align="center" width="940" border="1" cellspacing="0" cellpadding="3">
+<tr><td class="colhead" colspan="4" align="center"><font class="big">LongPT魔力值系统</font></td></tr>
+<tr><td class="text" align="center" colspan="4">用你的魔力值（当前98,663.2）换东东！</td></tr>
+<tr><td class="colhead" align="center">项目</td><td class="colhead" align="left">简介</td><td class="colhead" align="center">价格</td><td class="colhead" align="center">交换</td></tr>
 <tr>
 <form action="?action=exchange" method="post"></form>
-<td class="rowhead_center"><input type="hidden" name="option" value="4"><b>5</b></td>
-<td class="rowfollow" align="left"><h1>10.0 GB 下载量</h1>如果有足够的魔力值，你可以用它来换取下载量。</td>
-<td class="rowfollow" align="center">10,000</td>
-<td class="rowfollow" align="center"><input type="submit" name="submit" value="交换"></td></tr>
-<tr>
-<form action="?action=exchange" method="post"></form>
-<td class="rowhead_center"><input type="hidden" name="option" value="2"><b>3</b></td>
+<td class="rowhead_center"><input type="hidden" name="option" value="3"><b>3</b></td>
 <td class="rowfollow" align="left"><h1>10.0 GB上传量</h1>如果有足够的魔力值，你可以用它来换取上传量。</td>
 <td class="rowfollow" align="center">13,000</td>
-<td class="rowfollow" align="center"><input type="submit" name="submit" value="交换"></td></tr>
+<td class="rowfollow" align="center"><input type="submit" name="submit" value="交换"></td>
+</tr>
 <tr>
 <form action="?action=exchange" method="post"></form>
-<td class="rowhead_center"><input type="hidden" name="option" value="15"><b>16</b></td>
+<td class="rowhead_center"><input type="hidden" name="option" value="11"><b>11</b></td>
+<td class="rowfollow" align="left"><h1>10.0 GB下载量</h1>如果有足够的魔力值，你可以用它来换取下载量。</td>
+<td class="rowfollow" align="center">10,000</td>
+<td class="rowfollow" align="center"><input type="submit" name="submit" value="需要更多魔力值" disabled="disabled"></td>
+</tr>
+<tr>
+<form action="?action=exchange" method="post"></form>
+<td class="rowhead_center"><input type="hidden" name="option" value="9"><b>9</b></td>
 <td class="rowfollow" align="left"><h1>慈善捐赠</h1>你可以将你的魔力值通过慈善捐赠送与有需要的用户群体。</td>
 <td class="rowfollow nowrap" align="center">最少1,000<br>最多50,000</td>
-<td class="rowfollow" align="center"><input type="submit" name="submit" value="慈善捐赠"></td></tr>
+<td class="rowfollow" align="center"><input type="submit" name="submit" value="慈善捐赠"></td>
+</tr>
 </table>
 </body></html>
 """
@@ -289,22 +294,26 @@ def main():
     empty = parse_exchange_items(NO_PRICE, "https://pt.example/")
     assert_eq(empty, [], "no price => no items")
 
-    # LongPT 实测：空 form + 独立价格列 + [使用] 余额
+    # LongPT / 官方四列表格：空 form + 价格列 + [使用] 余额
     lp_stats = parse_user_stats(SAMPLE_LONGPT)
     assert_eq(lp_stats["bonus"], 98663.2, "LongPT bonus with [使用]")
     assert_eq(lp_stats["ratio"], 1.441, "LongPT ratio")
     lp = parse_exchange_items(SAMPLE_LONGPT, "https://longpt.org/mybonus.php")
     lp_kinds = {(it["option"], it["kind"], it["cost"]) for it in lp}
-    assert ("4", "download", 10000.0) in lp_kinds, lp_kinds
-    assert ("2", "upload", 13000.0) in lp_kinds, lp_kinds
-    assert all(opt != "15" for opt, _, _ in lp_kinds), f"charity row must be excluded: {lp_kinds}"
+    assert ("3", "upload", 13000.0) in lp_kinds, lp_kinds
+    assert ("11", "download", 10000.0) in lp_kinds, lp_kinds
+    assert all(opt != "9" for opt, _, _ in lp_kinds), f"charity row must be excluded: {lp_kinds}"
+    # 置灰按钮（需要更多魔力值）必须标记 disabled，供执行层跳过
+    dis = {it["option"]: it.get("disabled") for it in lp}
+    assert dis.get("11") is True and dis.get("3") is False, dis
     # 价格不能是体积数字（10 GB 的 10）
     for it in lp:
         assert it["cost"] >= 100, f"cost too small, likely size leak: {it}"
     # 相对 action 正确拼到 mybonus.php
     assert all(it["action"].startswith("https://longpt.org/mybonus.php") for it in lp), [it["action"] for it in lp]
-    lp_up = pick_item(lp, "upload", "cheap")
-    assert lp_up and lp_up["option"] == "2", lp_up
+    # pick_item 应跳过 disabled 行（11 是唯一下载项且置灰 => 无可用下载项）
+    lp_down = pick_item(lp, "download", "cheap")
+    assert lp_down is None, f"disabled row must not be picked: {lp_down}"
 
     login_stats = parse_user_stats(LOGIN_PAGE)
     assert_eq(login_stats["logged_in"], False, "login page")

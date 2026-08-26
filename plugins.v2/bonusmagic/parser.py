@@ -36,10 +36,12 @@ LOGIN_HINTS = (
     "cookie 已失效",
 )
 
-SUCCESS_HINTS = ("兑换成功", "兌換成功", "成功兑换", "成功兌換", "交换成功", "交換成功")
+SUCCESS_HINTS = ("兑换成功", "兌換成功", "成功兑换", "成功兌換", "交换成功", "交換成功", "祝贺你", "祝賀你")
 FAIL_BONUS_HINTS = ("魔力值不足", "魔力不足", "积分不足", "積分不足", "bonus not enough")
 FAIL_LIMIT_HINTS = ("过于频繁", "過於頻繁", "频率限制", "操作过快", "稍后再试", "稍後再試", "rate limit")
 ALREADY_HINTS = ("今日已兑换", "已兑换过", "已经兑换", "已兌換過")
+# NexusPHP 官方反作弊 die() 文案（mybonus.php: $_POST 带 userid/points/bonus/art 时）
+REJECT_HINTS = ("想作弊", "没门", "cheat")
 # 非流量类兑换行（借鉴油猴脚本词库）：含这些词的行不参与上传/下载解析，防止慈善/赠送行误判
 EXCLUDE_ITEM_HINTS = ("捐赠", "捐贈", "赠送", "贈送", "慈善", "gift", "donate", "charity", "invite", "邀请", "邀請")
 
@@ -287,6 +289,7 @@ def _build_item(
     extra_fields: Dict[str, str],
     submit_value: str,
     seen: set,
+    cost_override: Optional[float] = None,
 ) -> Optional[Dict[str, Any]]:
     if option in seen:
         return None
@@ -296,7 +299,7 @@ def _build_item(
     kind = _classify_kind(text)
     if kind not in ("upload", "download"):
         return None
-    cost = _extract_cost(text)
+    cost = cost_override if cost_override else _extract_cost(text)
     size_bytes = parse_size_bytes(text)
     if cost is None or cost <= 0 or not size_bytes:
         return None
@@ -318,6 +321,105 @@ def _build_item(
     }
 
 
+def _parse_official_table(html: str, base_url: str, seen: set) -> List[Dict[str, Any]]:
+    """按 NexusPHP 官方 mybonus.php 结构解析兑换表。
+
+    官方规格（xiaomlove/nexusphp master 分支实测源码）：
+    - 表头四列：项目(option) | 简介(description) | 价格(points) | 交换(trade)
+      （lang: col_option/col_description/col_points/col_trade，繁体为 價格/交換）
+    - 每行一个 <form action="?action=exchange" method="post">（非法位置但浏览器容忍），
+      内含 <input type="hidden" name="option" value="N">
+    - 价格单元格是 number_format($points)，纯千分位数字
+    - 不可兑换时按钮带 disabled（需要更多魔力值 / 分享率已很高 / 等级不足）
+    """
+    items: List[Dict[str, Any]] = []
+    if not html or "<td" not in html.lower():
+        return items
+    low_html = html.lower()
+    if "mybonus" not in low_html and "action=exchange" not in low_html:
+        return items
+
+    # 定位官方表头：项目/简介/价格(/交換)
+    header_m = re.search(
+        r"(?is)<tr[^>]*>(?:(?!</tr>).)*?(?:項目|项目)(?:(?!</tr>).)*?(?:簡介|简介)(?:(?!</tr>).)*?(?:價格|价格)(?:(?!</tr>).)*?</tr>",
+        html,
+    )
+    if not header_m:
+        return items
+    # 找到表头所在的 table
+    tbl_start = html.rfind("<table", 0, header_m.start())
+    tbl_end = html.find("</table>", header_m.end())
+    if tbl_start == -1 or tbl_end == -1:
+        return items
+    table = html[tbl_start:tbl_end + 8]
+
+    # 价格列序号：从 0 数
+    price_col = None
+    col_idx = -1
+    for cm in re.finditer(r"(?is)<t[dh]\b[^>]*>(.*?)</t[dh]>", html[header_m.start():header_m.end()]):
+        cell = strip_tags(cm.group(1))
+        col_idx += 1
+        if re.fullmatch(r"(?:價格|价格|points)", cell.strip(), re.I):
+            price_col = col_idx
+            break
+    if price_col is None:
+        price_col = 2  # 官方默认第三列
+
+    # 逐行处理
+    for tr_m in re.finditer(r"(?is)<tr\b[^>]*>(.*?)</tr>", table):
+        row = tr_m.group(1)
+        opt_m = re.search(
+            r"""<input\b[^>]*type\s*=\s*['"]hidden['"][^>]*name\s*=\s*['"]option['"][^>]*>""",
+            row,
+            re.I,
+        ) or re.search(
+            r"""<input\b[^>]*name\s*=\s*['"]option['"][^>]*type\s*=\s*['"]hidden['"][^>]*>""",
+            row,
+            re.I,
+        )
+        if not opt_m:
+            continue
+        option = _attr(opt_m.group(0), "value")
+        if not option:
+            continue
+        cells = list(re.finditer(r"(?is)<td\b[^>]*>(.*?)(?:</td>|$)", row))
+        texts = [strip_tags(c.group(1)) for c in cells]
+        # 简介：跳过纯数字格（option 序号）与价格列
+        desc = next(
+            (
+                t for i, t in enumerate(texts)
+                if t.strip() and i != price_col and not re.fullmatch(r"\s*\d+\s*", t)
+            ),
+            "",
+        )
+        # 价格：优先取表头定位的列，否则取第一个纯数字单元格
+        cost_val = None
+        if 0 <= price_col < len(texts):
+            cost_val = parse_number(texts[price_col])
+        if cost_val is None:
+            for t in texts:
+                m2 = re.fullmatch(r"\s*" + _NUM + r"\s*", t or "")
+                if m2:
+                    cost_val = parse_number(t)
+                    break
+        submit_m = re.search(r"""<input\b[^>]*type\s*=\s*['"]submit['"][^>]*>""", row, re.I)
+        disabled = bool(submit_m and re.search(r"""\bdisabled\b""", submit_m.group(0), re.I))
+        item = _build_item(
+            str(option),
+            f"{desc}\n{texts[price_col] if 0 <= price_col < len(texts) else ''}",
+            urljoin(base_url, "?action=exchange"),
+            "post",
+            {},
+            _attr(submit_m.group(0), "value") if submit_m and _attr(submit_m.group(0), "value") else "交换",
+            seen,
+            cost_override=cost_val,
+        )
+        if item:
+            item["disabled"] = disabled
+            items.append(item)
+    return items
+
+
 def parse_exchange_items(html: str, base_url: str = "") -> List[Dict[str, Any]]:
     """从 mybonus 页面动态解析可兑换项目。解析失败返回空列表。
 
@@ -329,6 +431,10 @@ def parse_exchange_items(html: str, base_url: str = "") -> List[Dict[str, Any]]:
     if not html:
         return items
     seen: set = set()
+    # 官方四列表格优先（xiaomlove/nexusphp 标准 mybonus.php）
+    official = _parse_official_table(html, base_url, seen)
+    if official:
+        return official
     forms = list(re.finditer(r"(?is)<form\b([^>]*)>(.*?)</form>", html))
     scan_regions: List[Tuple[str, str, str, Dict[str, str]]] = []
     if forms:
@@ -424,6 +530,10 @@ def classify_result(html: str, status_code: int = 200) -> Dict[str, Any]:
         result["code"] = "ok"
         result["success"] = True
         result["message"] = "兑换成功"
+        return result
+    if any(h in low for h in REJECT_HINTS):
+        result["code"] = "reject"
+        result["message"] = "站点拒绝（反作弊校验）"
         return result
     # 借鉴 HTTP 兑换脚本的判定：POST 后站点通常直接回渲染魔力页；
     # 已登录 + 返回页仍带兑换表单 + 无任何错误提示 => 视为已受理成功

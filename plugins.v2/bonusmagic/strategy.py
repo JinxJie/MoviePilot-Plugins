@@ -9,8 +9,12 @@ def pick_item(items: List[dict], kind: str, prefer: str = "cheap") -> Optional[d
     """
     从解析出的兑换项里挑一条。
     prefer: cheap=最便宜；max=单次获得流量最大；efficient=每魔力获得流量最高。
+    置灰（disabled）行是站点官方标记的不可兑换项，直接跳过。
     """
-    pool = [it for it in items if it.get("kind") == kind and it.get("cost") and it.get("size_bytes")]
+    pool = [
+        it for it in items
+        if it.get("kind") == kind and it.get("cost") and it.get("size_bytes") and not it.get("disabled")
+    ]
     if not pool:
         return None
     if prefer == "max":
