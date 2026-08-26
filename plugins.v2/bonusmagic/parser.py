@@ -40,6 +40,8 @@ SUCCESS_HINTS = ("兑换成功", "兌換成功", "成功兑换", "成功兌換",
 FAIL_BONUS_HINTS = ("魔力值不足", "魔力不足", "积分不足", "積分不足", "bonus not enough")
 FAIL_LIMIT_HINTS = ("过于频繁", "過於頻繁", "频率限制", "操作过快", "稍后再试", "稍後再試", "rate limit")
 ALREADY_HINTS = ("今日已兑换", "已兑换过", "已经兑换", "已兌換過")
+# 非流量类兑换行（借鉴油猴脚本词库）：含这些词的行不参与上传/下载解析，防止慈善/赠送行误判
+EXCLUDE_ITEM_HINTS = ("捐赠", "捐贈", "赠送", "贈送", "慈善", "gift", "donate", "charity", "invite", "邀请", "邀請")
 
 SIZE_UNIT = {
     "B": 1,
@@ -206,25 +208,22 @@ def _classify_kind(text: str) -> Optional[str]:
 
 
 def _extract_cost(text: str) -> Optional[float]:
+    # 先剔除体积数字（如 100.0 GB），避免把流量大小当价格（PTzone 实测踩坑）
+    cleaned = re.sub(r"(" + _NUM + r")\s*[KMGTPE]i?B", " ", text or "", flags=re.I)
     pats = [
         re.compile(r"(?:需要|消耗|花费|花費|cost)\s*(" + _NUM + r")\s*(?:魔力|積分|积分|bonus|karma)?", re.I),
         re.compile(r"(" + _NUM + r")\s*(?:魔力值|魔力|積分|积分|bonus)", re.I),
-        # 表格独立价格列：上下文里只有数字，常见于 NexusPHP 兑换页 <td align="center">3,000</td>
+        # 表格独立价格列：<td align="center">3,000</td>（LongPT 等）
         re.compile(r"(?:价格|price)\s*[:：]?\s*(" + _NUM + r")", re.I),
     ]
     for pat in pats:
-        m = pat.search(text)
+        m = pat.search(cleaned)
         if m:
             n = parse_number(m.group(1))
             if n is not None and n > 0:
                 return n
-    # 兜底：上下文里连续出现的数字，取第一个像价格的（>=100）
-    # 优先匹配紧挨在兑换项描述后面的数字，避免序号/年份等干扰
-    for m in re.finditer(r"(?:</h[1-6]>|</font>|</td>|</div>)\s*[:：]?\s*(" + _NUM + r")", text):
-        n = parse_number(m.group(1))
-        if n is not None and n >= 100:
-            return n
-    for m in re.finditer(r"(" + _NUM + r")", text):
+    # 兜底：独立价格列是裸数字，取第一个像价格的（>=100，避开序号）
+    for m in re.finditer(r"(" + _NUM + r")", cleaned):
         n = parse_number(m.group(1))
         if n is not None and n >= 100:
             return n
@@ -290,6 +289,9 @@ def _build_item(
     seen: set,
 ) -> Optional[Dict[str, Any]]:
     if option in seen:
+        return None
+    low_text = (text or "").lower()
+    if any(h in low_text for h in EXCLUDE_ITEM_HINTS):
         return None
     kind = _classify_kind(text)
     if kind not in ("upload", "download"):
@@ -423,9 +425,20 @@ def classify_result(html: str, status_code: int = 200) -> Dict[str, Any]:
         result["success"] = True
         result["message"] = "兑换成功"
         return result
+    # 借鉴 HTTP 兑换脚本的判定：POST 后站点通常直接回渲染魔力页；
+    # 已登录 + 返回页仍带兑换表单 + 无任何错误提示 => 视为已受理成功
+    raw = html or ""
+    if status_code == 200 and result["logged_in"] and re.search(r"""name\s*=\s*['"](?:option|bonusoption)['"]""", raw, re.I):
+        result["code"] = "ok"
+        result["success"] = True
+        result["message"] = "站点已受理（返回魔力页且无错误提示）"
+        return result
     if status_code >= 400:
         result["code"] = "http"
         result["message"] = f"HTTP {status_code}"
         return result
+    title_m = re.search(r"(?is)<title[^>]*>(.*?)</title>", raw)
+    if title_m:
+        result["message"] = f"无法识别站点响应：{strip_tags(title_m.group(1))[:120]}"
     result["code"] = "unknown"
     return result

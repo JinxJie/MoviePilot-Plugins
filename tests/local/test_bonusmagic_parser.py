@@ -145,6 +145,54 @@ SAMPLE_RADIO = """
 </body></html>
 """
 
+# LongPT 实测结构：空 form + hidden option 在前一个 td + 独立价格列（裸数字）
+SAMPLE_LONGPT = """
+<html><head><title>LongPT :: test的魔力值 - Powered by NexusPHP</title></head>
+<body>
+<a href="logout.php">[退出]</a>
+<font class="color_bonus">魔力值 </font>[<a href="mybonus.php">使用</a>]: 98,663.2
+<font class="color_ratio">分享率:</font> 1.441
+<font class="color_uploaded">上传量:</font> 73.34 GB
+<font class="color_downloaded">下载量:</font> 50.90 GB
+<table>
+<tr><td class="colhead">项目</td><td class="colhead">简介</td><td class="colhead">价格</td><td class="colhead">交换</td></tr>
+<tr>
+<form action="?action=exchange" method="post"></form>
+<td class="rowhead_center"><input type="hidden" name="option" value="4"><b>5</b></td>
+<td class="rowfollow" align="left"><h1>10.0 GB 下载量</h1>如果有足够的魔力值，你可以用它来换取下载量。</td>
+<td class="rowfollow" align="center">10,000</td>
+<td class="rowfollow" align="center"><input type="submit" name="submit" value="交换"></td></tr>
+<tr>
+<form action="?action=exchange" method="post"></form>
+<td class="rowhead_center"><input type="hidden" name="option" value="2"><b>3</b></td>
+<td class="rowfollow" align="left"><h1>10.0 GB上传量</h1>如果有足够的魔力值，你可以用它来换取上传量。</td>
+<td class="rowfollow" align="center">13,000</td>
+<td class="rowfollow" align="center"><input type="submit" name="submit" value="交换"></td></tr>
+<tr>
+<form action="?action=exchange" method="post"></form>
+<td class="rowhead_center"><input type="hidden" name="option" value="15"><b>16</b></td>
+<td class="rowfollow" align="left"><h1>慈善捐赠</h1>你可以将你的魔力值通过慈善捐赠送与有需要的用户群体。</td>
+<td class="rowfollow nowrap" align="center">最少1,000<br>最多50,000</td>
+<td class="rowfollow" align="center"><input type="submit" name="submit" value="慈善捐赠"></td></tr>
+</table>
+</body></html>
+"""
+
+# 兑换后站点直接回渲染魔力页（无成功/失败文案）——应视为已受理
+SAMPLE_ACCEPTED = """
+<html><head><title>LongPT :: test的魔力值 - Powered by NexusPHP</title></head>
+<body>
+<a href="logout.php">[退出]</a>
+<font class="color_bonus">魔力值 </font>[<a href="mybonus.php">使用</a>]: 88,663.2
+<table>
+<tr><form action="?action=exchange" method="post"></form>
+<td><input type="hidden" name="option" value="4"></td>
+<td>10.0 GB 下载量</td><td>10,000</td>
+<td><input type="submit" name="submit" value="交换"></td></tr>
+</table>
+</body></html>
+"""
+
 
 def assert_eq(actual, expected, msg=""):
     if actual != expected:
@@ -241,6 +289,23 @@ def main():
     empty = parse_exchange_items(NO_PRICE, "https://pt.example/")
     assert_eq(empty, [], "no price => no items")
 
+    # LongPT 实测：空 form + 独立价格列 + [使用] 余额
+    lp_stats = parse_user_stats(SAMPLE_LONGPT)
+    assert_eq(lp_stats["bonus"], 98663.2, "LongPT bonus with [使用]")
+    assert_eq(lp_stats["ratio"], 1.441, "LongPT ratio")
+    lp = parse_exchange_items(SAMPLE_LONGPT, "https://longpt.org/mybonus.php")
+    lp_kinds = {(it["option"], it["kind"], it["cost"]) for it in lp}
+    assert ("4", "download", 10000.0) in lp_kinds, lp_kinds
+    assert ("2", "upload", 13000.0) in lp_kinds, lp_kinds
+    assert all(opt != "15" for opt, _, _ in lp_kinds), f"charity row must be excluded: {lp_kinds}"
+    # 价格不能是体积数字（10 GB 的 10）
+    for it in lp:
+        assert it["cost"] >= 100, f"cost too small, likely size leak: {it}"
+    # 相对 action 正确拼到 mybonus.php
+    assert all(it["action"].startswith("https://longpt.org/mybonus.php") for it in lp), [it["action"] for it in lp]
+    lp_up = pick_item(lp, "upload", "cheap")
+    assert lp_up and lp_up["option"] == "2", lp_up
+
     login_stats = parse_user_stats(LOGIN_PAGE)
     assert_eq(login_stats["logged_in"], False, "login page")
 
@@ -257,6 +322,14 @@ def main():
     assert rl["code"] == "rate_limit" and rl["wait_seconds"] == 7.0
     lg = classify_result(LOGIN_PAGE, 200)
     assert lg["code"] == "login"
+
+    # 兑换后回渲染魔力页且无错误 => 已受理成功（借鉴 HTTP 兑换脚本判定）
+    acc = classify_result(SAMPLE_ACCEPTED, 200)
+    assert acc["success"] and acc["code"] == "ok", acc
+    # 有明确失败文案时仍按失败
+    fail_page = SAMPLE_ACCEPTED.replace("88,663.2", "88,663.2 魔力值不足")
+    fb = classify_result(fail_page, 200)
+    assert not fb["success"] and fb["code"] == "no_bonus", fb
 
     assert format_size(1024 ** 3) == "1.00 GB"
 
