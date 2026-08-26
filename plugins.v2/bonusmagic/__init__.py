@@ -9,11 +9,14 @@
 from __future__ import annotations
 
 import os
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urljoin, urlparse
+
+from fastapi import Body
 
 from app.core.config import settings
 from app.core.event import Event, eventmanager
@@ -25,8 +28,9 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from .adapters import detect_adapter
+from .page import build_page
 from .parser import format_size
-from .strategy import pick_item, plan_counts
+from .strategy import affordable_times, pick_item, plan_counts
 
 
 def _load_site_oper():
@@ -206,10 +210,37 @@ class BonusMagic(_PluginBase):
             {
                 "path": "/run",
                 "summary": "立即执行兑换",
-                "description": "手动触发一轮魔力兑换",
+                "description": "单站 / 批量（勾选） / 全部；站间并发、站内限速",
                 "endpoint": self._api_run,
                 "methods": ["POST"],
-                "auth": "bear",
+            },
+            {
+                "path": "/refresh",
+                "summary": "刷新站点魔力与兑换项",
+                "description": "只解析不兑换；可指定 domain 或刷新全部",
+                "endpoint": self._api_refresh,
+                "methods": ["POST"],
+            },
+            {
+                "path": "/select",
+                "summary": "勾选站点",
+                "description": "勾选站点：单站切换、全选/取消全选、仅选可兑换、仅选有推荐方案",
+                "endpoint": self._api_select,
+                "methods": ["POST"],
+            },
+            {
+                "path": "/recommend",
+                "summary": "智能推荐",
+                "description": "刷新全部站点并按策略生成推荐方案，自动勾选可兑换站，不立即兑换",
+                "endpoint": self._api_recommend,
+                "methods": ["POST"],
+            },
+            {
+                "path": "/smart",
+                "summary": "一键智能兑换",
+                "description": "刷新→智能计算→过滤→并发执行推荐站点",
+                "endpoint": self._api_smart,
+                "methods": ["POST"],
             },
             {
                 "path": "/records",
@@ -217,7 +248,6 @@ class BonusMagic(_PluginBase):
                 "description": "最近兑换任务记录",
                 "endpoint": self._api_records,
                 "methods": ["GET"],
-                "auth": "bear",
             },
         ]
 
@@ -248,13 +278,222 @@ class BonusMagic(_PluginBase):
         logger.info("收到 /bonusmagic 命令，开始执行魔力兑换")
         self._run_job(manual=True)
 
-    def _api_run(self) -> dict:
+    @staticmethod
+    def _body_get(data: Optional[dict], key: str, default: str = "") -> str:
+        if not isinstance(data, dict):
+            return default
+        val = data.get(key)
+        return default if val is None else str(val)
+
+    def _api_run(self, domain: str = "", scope: str = "", data: Optional[Dict[str, Any]] = Body(default=None)) -> dict:
+        domain = domain or self._body_get(data, "domain")
+        scope = (scope or self._body_get(data, "scope") or "selected").strip().lower()
         try:
-            summary = self._run_job(manual=True)
-            return {"success": True, "message": "兑换任务已执行", "data": summary}
+            if domain:
+                targets = [domain]
+            elif scope == "all":
+                targets = None
+            else:
+                selected = self._load_selected()
+                if selected:
+                    targets = selected
+                else:
+                    return {"success": False, "message": "尚未勾选站点"}
+            summary = self._run_job(manual=True, targets=targets)
+            return {"success": True, "message": "批量兑换已执行" if not domain else "单站兑换已执行", "data": summary}
         except Exception as e:
             logger.error(f"魔力兑换 API 失败：{e}")
             return {"success": False, "message": str(e)}
+
+    def _api_refresh(self, domain: str = "", data: Optional[Dict[str, Any]] = Body(default=None)) -> dict:
+        domain = domain or self._body_get(data, "domain")
+        try:
+            rows = self._refresh_sites(domain or None)
+            return {"success": True, "message": f"已刷新 {len(rows)} 个站点", "data": rows}
+        except Exception as e:
+            logger.error(f"刷新站点失败：{e}")
+            return {"success": False, "message": str(e)}
+
+    @staticmethod
+    def _estimate_row_spend(row: dict) -> Optional[float]:
+        """从推荐次数与「1 GB / 1000 魔力」单价估算消耗。"""
+        up_n = int(row.get("plan_upload") or 0)
+        down_n = int(row.get("plan_download") or 0)
+        total = 0.0
+        known = False
+
+        def unit(text: Any) -> Optional[float]:
+            if not text:
+                return None
+            m = re.search(r"/\s*([\d,]+(?:\.\d+)?)\s*", str(text))
+            if not m:
+                m = re.search(r"([\d,]+(?:\.\d+)?)\s*魔力", str(text))
+            if not m:
+                return None
+            try:
+                return float(m.group(1).replace(",", ""))
+            except ValueError:
+                return None
+
+        up_cost = unit(row.get("item_upload"))
+        down_cost = unit(row.get("item_download"))
+        if up_n and up_cost is not None:
+            total += up_n * up_cost
+            known = True
+        if down_n and down_cost is not None:
+            total += down_n * down_cost
+            known = True
+        return total if known else None
+
+    def _build_recommend_snapshot(self, rows: Optional[List[dict]] = None) -> dict:
+        rows = rows if rows is not None else self._dashboard_rows()
+        items = []
+        actionable = []
+        for row in rows:
+            up_n = int(row.get("plan_upload") or 0)
+            down_n = int(row.get("plan_download") or 0)
+            spend = self._estimate_row_spend(row)
+            item = {
+                "name": row.get("name"),
+                "domain": row.get("domain"),
+                "bonus": row.get("bonus"),
+                "ratio": row.get("ratio"),
+                "upload": row.get("upload"),
+                "download": row.get("download"),
+                "status": row.get("status"),
+                "plan_upload": up_n,
+                "plan_download": down_n,
+                "plan_reason": row.get("plan_reason") or row.get("message") or "",
+                "item_upload": row.get("item_upload") or "",
+                "item_download": row.get("item_download") or "",
+                "estimate_spend": spend,
+                "actionable": up_n > 0 or down_n > 0,
+            }
+            items.append(item)
+            if item["actionable"]:
+                actionable.append(str(item["domain"]))
+        snap = {
+            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "total": len(items),
+            "actionable": len(actionable),
+            "skipped": len(items) - len(actionable),
+            "domains": actionable,
+            "items": items,
+        }
+        self.save_data("smart_recommend", snap)
+        self.save_data("selected_domains", actionable)
+        return snap
+
+    def _api_recommend(self, data: Optional[Dict[str, Any]] = Body(default=None)) -> dict:
+        """智能推荐：刷新全部 → 生成方案 → 勾选可兑换站，不执行。"""
+        try:
+            rows = self._refresh_sites()
+            snap = self._build_recommend_snapshot(rows)
+            return {
+                "success": True,
+                "message": f"智能推荐完成：可兑 {snap['actionable']} / 共 {snap['total']}",
+                "data": snap,
+            }
+        except Exception as e:
+            logger.error(f"智能推荐失败：{e}")
+            return {"success": False, "message": str(e)}
+
+    def _api_smart(self, data: Optional[Dict[str, Any]] = Body(default=None)) -> dict:
+        """一键智能兑换：刷新 → 推荐 → 过滤 → 并发执行。"""
+        try:
+            rows = self._refresh_sites()
+            snap = self._build_recommend_snapshot(rows)
+            targets = snap.get("domains") or []
+            if not targets:
+                return {"success": True, "message": "没有适合兑换的站点", "data": {"recommend": snap, "summary": None}}
+            summary = self._run_job(manual=True, targets=targets)
+            return {
+                "success": True,
+                "message": f"一键智能兑换完成：执行 {len(targets)} 站",
+                "data": {"recommend": snap, "summary": summary},
+            }
+        except Exception as e:
+            logger.error(f"一键智能兑换失败：{e}")
+            return {"success": False, "message": str(e)}
+
+    def _api_select(self, domain: str = "", selected: str = "", scope: str = "", domains: str = "", data: Optional[Dict[str, Any]] = Body(default=None)) -> dict:
+        """
+        勾选站点 → 再执行兑换。
+        scope:
+          - all: 全选 / 取消全选（配合 selected=1/0）
+          - none: 取消全选
+          - ready / exchangeable: 仅选择可兑换站点
+          - recommended: 仅选择有推荐方案的站点
+          - 空 + domain: 单站勾选/取消
+          - 空 + domains: 多站批量勾选（逗号分隔）
+        """
+        domain = (domain or self._body_get(data, "domain")).strip()
+        domains_raw = (domains or self._body_get(data, "domains")).strip()
+        scope = (scope or self._body_get(data, "scope")).strip().lower()
+        raw = selected if selected != "" else self._body_get(data, "selected", "1")
+        flag = str(raw).strip().lower() not in ("0", "false", "no", "off")
+
+        sites = self._list_sites()
+        known = {s["domain"] for s in sites}
+        rows = {r.get("domain"): r for r in self._dashboard_rows()}
+        current = set(self._load_selected())
+
+        def is_exchangeable(row: dict) -> bool:
+            if not row:
+                return False
+            if row.get("status") == "ready":
+                return True
+            try:
+                if int(row.get("afford_upload") or 0) > 0 or int(row.get("afford_download") or 0) > 0:
+                    return True
+            except (TypeError, ValueError):
+                pass
+            return False
+
+        def has_recommend(row: dict) -> bool:
+            if not row:
+                return False
+            try:
+                return int(row.get("plan_upload") or 0) > 0 or int(row.get("plan_download") or 0) > 0
+            except (TypeError, ValueError):
+                return False
+
+        if scope in ("none", "clear"):
+            current = set()
+        elif scope == "all":
+            current = set(known) if flag else set()
+        elif scope in ("ready", "exchangeable"):
+            current = {d for d, row in rows.items() if d in known and is_exchangeable(row)}
+        elif scope in ("recommended", "recommend", "plan"):
+            current = {d for d, row in rows.items() if d in known and has_recommend(row)}
+        elif domains_raw:
+            wanted = {x.strip() for x in domains_raw.replace(";", ",").split(",") if x.strip()}
+            if flag:
+                current |= {d for d in wanted if d in known}
+            else:
+                current -= wanted
+        elif domain:
+            if flag:
+                current.add(domain)
+            else:
+                current.discard(domain)
+        else:
+            # 无参数时保持现状，避免误清空
+            pass
+
+        saved = sorted(str(d) for d in current if d and d in known)
+        self.save_data("selected_domains", saved)
+        label = {
+            "all": "全选" if flag else "取消全选",
+            "none": "取消全选",
+            "clear": "取消全选",
+            "ready": "仅选可兑换",
+            "exchangeable": "仅选可兑换",
+            "recommended": "仅选有推荐",
+            "recommend": "仅选有推荐",
+            "plan": "仅选有推荐",
+        }.get(scope, "已更新勾选")
+        return {"success": True, "message": f"{label} · 已选 {len(saved)} 站", "data": saved}
 
     def _api_records(self) -> dict:
         return {"success": True, "data": self._load_records()}
@@ -410,7 +649,7 @@ class BonusMagic(_PluginBase):
 
     # ======================== 核心任务 ========================
 
-    def _run_job(self, manual: bool = False) -> dict:
+    def _run_job(self, manual: bool = False, targets: Optional[List[str]] = None) -> dict:
         if not manual and not self._enabled:
             return {"ok": False, "message": "插件未启用"}
         if self._running:
@@ -421,6 +660,9 @@ class BonusMagic(_PluginBase):
         logger.info(f"魔力兑换开始（{'手动' if manual else '定时'}）")
         try:
             sites = self._list_sites()
+            if targets:
+                want = {str(x).lower() for x in targets}
+                sites = [s for s in sites if (s.get("domain") or "").lower() in want or (s.get("name") or "").lower() in want]
             if not sites:
                 msg = "没有可用站点（需在 MoviePilot 站点管理中启用并配置 Cookie）"
                 logger.warning(msg)
@@ -625,6 +867,9 @@ class BonusMagic(_PluginBase):
         )
         rec["plan_upload"] = up_n
         rec["plan_download"] = down_n
+        rec["plan_reason"] = reason
+        rec["afford_upload"] = affordable_times(rec["bonus"], up_item["cost"] if up_item else None, self._keep_bonus) if up_item else 0
+        rec["afford_download"] = affordable_times(rec["bonus"], down_item["cost"] if down_item else None, self._keep_bonus) if down_item else 0
         log(f"计划：上传 {up_n} 次 / 下载 {down_n} 次 · {reason}")
         if up_n <= 0 and down_n <= 0:
             rec["status"] = "skipped"
@@ -731,7 +976,8 @@ class BonusMagic(_PluginBase):
         for r in summary.get("sites") or []:
             slim_sites.append({k: r.get(k) for k in (
                 "name", "domain", "status", "message", "bonus", "ratio",
-                "plan_upload", "plan_download", "exchanges", "spent",
+                "upload", "download", "plan_upload", "plan_download", "plan_reason",
+                "afford_upload", "afford_download", "exchanges", "spent",
                 "got_upload", "got_download", "success", "fail", "wait",
                 "item_upload", "item_download", "architecture",
             )})
@@ -740,6 +986,7 @@ class BonusMagic(_PluginBase):
         records.append(record)
         self.save_data("records", records[-30:])
         self.save_data("last", record)
+        self._merge_dashboard(slim_sites)
 
         totals = self.get_data("totals") or {
             "runs": 0, "exchanges": 0, "spent": 0, "got_upload": 0, "got_download": 0, "success": 0, "fail": 0,
@@ -774,165 +1021,229 @@ class BonusMagic(_PluginBase):
 
     # ======================== 页面 ========================
 
+    def _load_selected(self) -> List[str]:
+        data = self.get_data("selected_domains")
+        if isinstance(data, list):
+            return [str(x) for x in data if x]
+        return []
+
+    def _load_dashboard(self) -> dict:
+        data = self.get_data("dashboard") or {}
+        return data if isinstance(data, dict) else {}
+
+    def _merge_dashboard(self, rows: List[dict]):
+        dash = self._load_dashboard()
+        for row in rows or []:
+            domain = row.get("domain")
+            if not domain:
+                continue
+            old = dash.get(domain) or {}
+            merged = {**old, **{k: v for k, v in row.items() if v is not None}}
+            dash[domain] = merged
+        self.save_data("dashboard", dash)
+
+    def _dashboard_rows(self) -> List[dict]:
+        sites = self._list_sites()
+        dash = self._load_dashboard()
+        last_sites = {(r.get("domain") or ""): r for r in ((self.get_data("last") or {}).get("sites") or [])}
+        selected = self._load_selected()
+        # 空列表 = 未勾选任何站（勾选→操作→执行）；不再默认全选
+        selected_set = set(selected)
+        rows = []
+        for site in sites:
+            domain = site["domain"]
+            row = {
+                "name": site["name"],
+                "domain": domain,
+                "status": "idle",
+                "message": "",
+                "bonus": None,
+                "upload": None,
+                "download": None,
+                "ratio": None,
+                "item_upload": "",
+                "item_download": "",
+                "afford_upload": 0,
+                "afford_download": 0,
+                "plan_upload": 0,
+                "plan_download": 0,
+                "plan_reason": "",
+                "architecture": "",
+                "spent": 0,
+                "got_upload": 0,
+                "got_download": 0,
+                "last_result": "",
+            }
+            if domain in last_sites:
+                row.update({k: last_sites[domain].get(k) for k in last_sites[domain] if last_sites[domain].get(k) is not None})
+                if last_sites[domain].get("message"):
+                    row["last_result"] = last_sites[domain].get("message")
+            if domain in dash:
+                cached = dash[domain]
+                row.update({k: cached.get(k) for k in cached if cached.get(k) is not None})
+            row["name"] = site["name"]
+            row["domain"] = domain
+            row["selected"] = domain in selected_set
+            if not row.get("status"):
+                row["status"] = "idle"
+            rows.append(row)
+        return rows
+
+    def _inspect_site(self, site: dict) -> dict:
+        """只解析不兑换，供首页刷新。"""
+        rec = {
+            "name": site["name"],
+            "domain": site["domain"],
+            "status": "idle",
+            "message": "",
+            "bonus": None,
+            "upload": None,
+            "download": None,
+            "ratio": None,
+            "item_upload": "",
+            "item_download": "",
+            "afford_upload": 0,
+            "afford_download": 0,
+            "plan_upload": 0,
+            "plan_download": 0,
+            "plan_reason": "",
+            "architecture": "",
+        }
+        html = ""
+        last_err = ""
+        adapter = None
+        domain = site["domain"]
+        for attempt in range(self._retry + 1):
+            try:
+                code, html, headers = self._get(site, "index.php")
+                if code == 0:
+                    last_err = "首页请求失败"
+                else:
+                    forced = "" if self._architecture == "auto" else self._architecture
+                    adapter, score, how = detect_adapter(site, html, forced=forced)
+                    rec["architecture"] = adapter.name
+                    wait = adapter.parse_wait(html, headers)
+                    if wait:
+                        self._sleep_for_site(domain, wait, "刷新首页")
+                    stats = adapter.parse_user_stats(html)
+                    if not stats.get("logged_in"):
+                        rec["status"] = "login"
+                        rec["message"] = "登录失效"
+                        return rec
+                    rec["bonus"] = stats.get("bonus")
+                    rec["upload"] = stats.get("upload")
+                    rec["download"] = stats.get("download")
+                    rec["ratio"] = stats.get("ratio")
+                    break
+            except Exception as e:
+                last_err = str(e)
+            if attempt < self._retry:
+                time.sleep(1 + attempt)
+        else:
+            rec["status"] = "failed"
+            rec["message"] = last_err or "首页请求失败"
+            return rec
+        if adapter is None:
+            rec["status"] = "failed"
+            rec["message"] = "未识别站点架构"
+            return rec
+
+        catalog_html = ""
+        catalog_path = adapter.catalog_path(site)
+        for attempt in range(self._retry + 1):
+            try:
+                code, catalog_html, headers = self._get(site, catalog_path, adapter)
+                if code == 0:
+                    last_err = "魔力页请求失败"
+                else:
+                    wait = adapter.parse_wait(catalog_html, headers)
+                    if wait:
+                        self._sleep_for_site(domain, wait, "刷新魔力页")
+                    stats2 = adapter.parse_user_stats(catalog_html)
+                    if stats2.get("bonus") is not None:
+                        rec["bonus"] = stats2["bonus"]
+                    if not stats2.get("logged_in"):
+                        rec["status"] = "login"
+                        rec["message"] = "魔力页显示未登录"
+                        return rec
+                    break
+            except Exception as e:
+                last_err = str(e)
+            if attempt < self._retry:
+                time.sleep(1 + attempt)
+        else:
+            rec["status"] = "failed"
+            rec["message"] = last_err or "魔力页请求失败"
+            return rec
+
+        base = site["url"].rstrip("/") + "/"
+        items = adapter.parse_catalog(catalog_html, base, site)
+        if not items:
+            rec["status"] = "parse"
+            rec["message"] = "解析不到兑换价格"
+            return rec
+        up_item = pick_item(items, "upload", self._item_prefer) if self._enable_upload else None
+        down_item = pick_item(items, "download", self._item_prefer) if self._enable_download else None
+        if up_item:
+            rec["item_upload"] = f"{up_item['size_text']} / {up_item['cost']} 魔力"
+        if down_item:
+            rec["item_download"] = f"{down_item['size_text']} / {down_item['cost']} 魔力"
+        rec["afford_upload"] = affordable_times(rec["bonus"], up_item["cost"] if up_item else None, self._keep_bonus) if up_item else 0
+        rec["afford_download"] = affordable_times(rec["bonus"], down_item["cost"] if down_item else None, self._keep_bonus) if down_item else 0
+        up_n, down_n, reason = plan_counts(
+            bonus=rec["bonus"],
+            ratio=rec["ratio"],
+            upload_item=up_item,
+            download_item=down_item,
+            enable_upload=self._enable_upload,
+            enable_download=self._enable_download,
+            strategy=self._strategy,
+            fixed_upload=self._fixed_upload,
+            fixed_download=self._fixed_download,
+            max_upload=self._max_upload,
+            max_download=self._max_download,
+            keep_bonus=self._keep_bonus,
+            ratio_threshold=self._ratio_threshold,
+            priority=self._priority,
+            max_spend=self._max_spend,
+        )
+        rec["plan_upload"] = up_n
+        rec["plan_download"] = down_n
+        rec["plan_reason"] = reason
+        rec["status"] = "ready"
+        rec["message"] = reason
+        return rec
+
+    def _refresh_sites(self, domain: Optional[str] = None) -> List[dict]:
+        sites = self._list_sites()
+        if domain:
+            sites = [s for s in sites if s.get("domain") == domain or s.get("name") == domain]
+        rows = []
+        if not sites:
+            return rows
+        workers = min(self._concurrency, len(sites))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futs = {pool.submit(self._inspect_site, site): site for site in sites}
+            for fut in as_completed(futs):
+                site = futs[fut]
+                try:
+                    rows.append(fut.result())
+                except Exception as e:
+                    rows.append({
+                        "name": site.get("name"),
+                        "domain": site.get("domain"),
+                        "status": "failed",
+                        "message": str(e),
+                    })
+        self._merge_dashboard(rows)
+        return rows
+
     def get_page(self) -> List[dict]:
-        last = self.get_data("last") or {}
-        totals = self.get_data("totals") or {}
-        records = self._load_records()
-        sites = last.get("sites") or []
-
-        def kpi_card(icon: str, label: str, value: str, value_color: str = "", note: str = "") -> dict:
-            value_cls = f"text-h6 font-weight-bold text-{value_color}" if value_color else "text-h6 font-weight-bold"
-            children = [
-                {"component": "div", "props": {"class": "text-h5 mb-1"}, "text": icon},
-                {"component": "span", "props": {
-                    "class": value_cls,
-                    "style": "display:block; font-size: clamp(0.8rem, 3.8vw, 1.25rem); white-space: normal; overflow-wrap: anywhere; word-break: break-all; line-height: 1.2;",
-                }, "text": value},
-                {"component": "span", "props": {"class": "text-caption text-medium-emphasis d-block mt-1"}, "text": label},
-            ]
-            if note:
-                children.append({"component": "div", "props": {"class": "text-caption text-medium-emphasis", "style": "white-space: normal; overflow-wrap: anywhere;"}, "text": note})
-            return {
-                "component": "VCard",
-                "props": {"variant": "flat", "elevation": 2, "class": "h-100 rounded-lg"},
-                "content": [{"component": "VCardText", "props": {"class": "text-center pa-3"}, "content": children}],
-            }
-
-        def run_tr(cells: List[tuple], head: bool = False) -> dict:
-            return {
-                "component": "tr",
-                "content": [
-                    {"component": "th" if head else "td", "props": {"class": cls}, "text": text}
-                    for text, cls in cells
-                ],
-            }
-
-        last_spent = last.get("spent") or 0
-        last_up = format_size(last.get("got_upload"))
-        last_down = format_size(last.get("got_download"))
-        total_spent = totals.get("spent") or 0
-
-        site_table = {
-            "component": "VTable",
-            "props": {"hover": True, "density": "compact", "class": "run-records-table", "style": "min-width: 720px;"},
-            "content": [
-                {"component": "thead", "content": [run_tr([
-                    ("站点", "text-body-2 text-start ps-3 text-no-wrap"),
-                    ("状态", "text-body-2 text-center text-no-wrap"),
-                    ("魔力", "text-body-2 text-center text-no-wrap"),
-                    ("计划", "text-body-2 text-center text-no-wrap"),
-                    ("实际", "text-body-2 text-center text-no-wrap"),
-                    ("消耗", "text-body-2 text-center text-no-wrap"),
-                    ("获得", "text-body-2 text-start text-no-wrap"),
-                    ("说明", "text-body-2 text-start"),
-                ], head=True)]},
-                {"component": "tbody", "content": []},
-            ],
-        }
-        for r in sites:
-            status = r.get("status") or "—"
-            color = {
-                "done": "text-success",
-                "skipped": "text-info",
-                "login": "text-error",
-                "failed": "text-error",
-                "parse": "text-error",
-                "no_bonus": "text-warning",
-            }.get(status, "")
-            got = []
-            if r.get("got_upload"):
-                got.append(f"↑{format_size(r.get('got_upload'))}")
-            if r.get("got_download"):
-                got.append(f"↓{format_size(r.get('got_download'))}")
-            site_table["content"][1]["content"].append(run_tr([
-                (str(r.get("name") or "—"), "text-body-2 text-start ps-3 text-no-wrap font-weight-bold"),
-                (str(status), f"text-body-2 font-weight-bold text-center text-no-wrap {color}"),
-                (str(r.get("bonus") if r.get("bonus") is not None else "—"), "text-body-2 text-center text-no-wrap"),
-                (f"↑{r.get('plan_upload', 0)} ↓{r.get('plan_download', 0)}", "text-body-2 text-center text-no-wrap"),
-                (f"{r.get('success', 0)}/{r.get('exchanges', 0)}", "text-body-2 text-center text-no-wrap"),
-                (str(r.get("spent") or 0), "text-body-2 text-center text-no-wrap"),
-                (" ".join(got) or "—", "text-body-2 text-start text-no-wrap"),
-                (str(r.get("message") or "—"), "text-body-2 text-start"),
-            ]))
-
-        hist_table = {
-            "component": "VTable",
-            "props": {"hover": True, "density": "compact", "class": "run-records-table", "style": "min-width: 640px;"},
-            "content": [
-                {"component": "thead", "content": [run_tr([
-                    ("时间", "text-body-2 text-start ps-3 text-no-wrap"),
-                    ("成功", "text-body-2 text-center text-no-wrap"),
-                    ("失败", "text-body-2 text-center text-no-wrap"),
-                    ("消耗魔力", "text-body-2 text-center text-no-wrap"),
-                    ("获得上传", "text-body-2 text-center text-no-wrap"),
-                    ("获得下载", "text-body-2 text-center text-no-wrap"),
-                ], head=True)]},
-                {"component": "tbody", "content": []},
-            ],
-        }
-        for r in reversed(records[-12:]):
-            hist_table["content"][1]["content"].append(run_tr([
-                (str(r.get("time") or "—"), "text-body-2 text-start ps-3 text-no-wrap"),
-                (str(r.get("success") or 0), "text-body-2 text-center text-no-wrap text-success"),
-                (str(r.get("fail") or 0), "text-body-2 text-center text-no-wrap text-error"),
-                (str(r.get("spent") or 0), "text-body-2 text-center text-no-wrap"),
-                (format_size(r.get("got_upload")), "text-body-2 text-center text-no-wrap"),
-                (format_size(r.get("got_download")), "text-body-2 text-center text-no-wrap"),
-            ]))
-
-        return [
-            {
-                "component": "VRow",
-                "content": [{
-                    "component": "VCol", "props": {"cols": 12}, "content": [{
-                        "component": "VCard", "props": {"variant": "flat", "elevation": 2, "class": "h-100 rounded-lg"},
-                        "content": [
-                            {"component": "VCardTitle", "text": "💎 兑换概况"},
-                            {"component": "VCardSubtitle", "text": last.get("time") or "尚未执行"},
-                            {"component": "VCardText", "props": {"class": "pa-2"}, "content": [
-                                {"component": "VRow", "props": {"dense": True}, "content": [
-                                    {"component": "VCol", "props": {"cols": 6, "md": 3}, "content": [
-                                        kpi_card("🔁", "累计次数", f"{int(totals.get('exchanges') or 0)}", "info", f"任务 {int(totals.get('runs') or 0)} 轮"),
-                                    ]},
-                                    {"component": "VCol", "props": {"cols": 6, "md": 3}, "content": [
-                                        kpi_card("💎", "累计消耗", f"{total_spent}", "warning", f"最近 {last_spent}"),
-                                    ]},
-                                    {"component": "VCol", "props": {"cols": 6, "md": 3}, "content": [
-                                        kpi_card("⬆️", "累计上传", format_size(totals.get("got_upload")), "success", f"最近 {last_up}"),
-                                    ]},
-                                    {"component": "VCol", "props": {"cols": 6, "md": 3}, "content": [
-                                        kpi_card("⬇️", "累计下载", format_size(totals.get("got_download")), "error", f"最近 {last_down}"),
-                                    ]},
-                                ]},
-                            ]},
-                        ],
-                    }],
-                }],
-            },
-            {
-                "component": "VRow",
-                "content": [{
-                    "component": "VCol", "props": {"cols": 12}, "content": [{
-                        "component": "VCard", "props": {"variant": "flat", "elevation": 2, "class": "h-100 rounded-lg"},
-                        "content": [
-                            {"component": "VCardTitle", "text": "📡 最近一轮 · 各站点"},
-                            {"component": "VCardSubtitle", "text": "同一站点串行，多站点并发；解析不到价格不会兑换"},
-                            {"component": "VCardText", "props": {"class": "pa-2", "style": "overflow-x:auto;"}, "content": [site_table if sites else {"component": "div", "props": {"class": "text-medium-emphasis pa-3"}, "text": "还没有执行记录"}]},
-                        ],
-                    }],
-                }],
-            },
-            {
-                "component": "VRow",
-                "content": [{
-                    "component": "VCol", "props": {"cols": 12}, "content": [{
-                        "component": "VCard", "props": {"variant": "flat", "elevation": 2, "class": "h-100 rounded-lg"},
-                        "content": [
-                            {"component": "VCardTitle", "text": "📋 任务记录"},
-                            {"component": "VCardSubtitle", "text": "最近 12 轮"},
-                            {"component": "VCardText", "props": {"class": "pa-2", "style": "overflow-x:auto;"}, "content": [hist_table if records else {"component": "div", "props": {"class": "text-medium-emphasis pa-3"}, "text": "暂无记录"}]},
-                        ],
-                    }],
-                }],
-            },
-        ]
+        return build_page(
+            self,
+            self._dashboard_rows(),
+            self.get_data("last") or {},
+            self.get_data("totals") or {},
+            self._load_records(),
+            self.get_data("smart_recommend") or {},
+        )

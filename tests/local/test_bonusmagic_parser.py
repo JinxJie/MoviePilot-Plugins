@@ -44,6 +44,8 @@ aps_cron = types.ModuleType("apscheduler.triggers.cron")
 aps_cron.CronTrigger = type("CronTrigger", (), {"from_crontab": staticmethod(lambda x: x)})
 aps_bg = types.ModuleType("apscheduler.schedulers.background")
 aps_bg.BackgroundScheduler = type("BackgroundScheduler", (), {})
+fastapi = types.ModuleType("fastapi")
+fastapi.Body = lambda default=None, **_k: default
 for name, mod in {
     "app": app, "app.core": app_core, "app.core.config": app_config, "app.core.event": app_event,
     "app.log": app_log, "app.schemas": app_schemas, "app.schemas.types": app_types,
@@ -52,6 +54,7 @@ for name, mod in {
     "apscheduler.triggers.cron": aps_cron,
     "apscheduler.schedulers": types.ModuleType("apscheduler.schedulers"),
     "apscheduler.schedulers.background": aps_bg,
+    "fastapi": fastapi,
 }.items():
     sys.modules[name] = mod
 
