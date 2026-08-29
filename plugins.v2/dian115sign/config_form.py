@@ -65,7 +65,7 @@ def build_form() -> Tuple[List[dict], Dict[str, Any]]:
                     row([
                         col(12, textfield("token", "🔑 登录 Token（__Host-portal_token）",
                                            placeholder="粘贴浏览器 Cookie 中的 __Host-portal_token 值",
-                                           hint="登录 m.dian115.com 后按 F12 → Application → Cookies 中复制；JWT 长期有效，过期后需重新获取",
+                                           hint="登录 m.dian115.com 后按 F12 → Application → Cookies 中复制；站点 JWT 会过期（常见几天到十几天），失效后需重新登录再复制",
                                            persistent_hint=True, clearable=True)),
                     ]),
                 ]),
@@ -105,7 +105,7 @@ def build_form() -> Tuple[List[dict], Dict[str, Any]]:
                     ]),
                 ]),
 
-                alert("info", "Token 获取方法：电脑浏览器打开 m.dian115.com 并登录 → F12 开发者工具 → Application（应用）→ Cookies → 复制 __Host-portal_token 的值。"),
+                alert("info", "Token 获取方法：电脑浏览器打开 m.dian115.com 并登录 → F12 开发者工具 → Application（应用）→ Cookies → 复制 __Host-portal_token 的值。站点登录态会过期，失效后重新登录再复制即可。"),
             ],
         },
     ]

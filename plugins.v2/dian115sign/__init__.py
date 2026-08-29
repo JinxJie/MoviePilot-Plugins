@@ -75,6 +75,15 @@ class Dian115Sign(_PluginBase):
     # browser-session 有效期（秒），提前 5 分钟刷新
     SESSION_TTL_MARGIN = 300
 
+    # 站点前端 ya{} 对照：登录态失效（需重新复制 Cookie）
+    AUTH_FAIL_CODES = {
+        "no_token": "未登录（请求未带上 Token）",
+        "invalid_token": "登录已失效，请重新从浏览器复制 Token",
+        "token_revoked": "登录已被吊销，请重新登录后复制 Token",
+        "unauthorized": "请先登录",
+    }
+    PROOF_RETRY_CODES = ("browser_proof_required", "browser_proof_invalid")
+
     # curl_cffi 浏览器指纹回退链：
     # 从各版本都原生支持的老目标开始（0.5.x 只有 chrome99~110/edge/safari；
     # 新版虽有 chrome124+ 但老 libcurl 实现的 TLS 细节可能被 WAF 识别）
@@ -89,6 +98,7 @@ class Dian115Sign(_PluginBase):
         self._session_expires_at = 0
         self._clock_skew_ms = 0
         self._visitor_id = str(uuid.uuid4())
+        self._last_error = ""
 
     # ======================== 配置项声明 ========================
 
@@ -97,6 +107,9 @@ class Dian115Sign(_PluginBase):
             self._enabled = config.get("enabled") or False
             self._token = self._extract_token((config.get("token") or "").strip())
             self._lucky_mode = bool(config.get("lucky_mode"))
+            note = self._token_expiry_note()
+            if note:
+                logger.info(f"癫影 {note}")
             self._cron = config.get("cron") or "30 9 * * *"
             self._notify = config.get("notify")
             self._notify = False if self._notify is None else self._notify
@@ -144,6 +157,50 @@ class Dian115Sign(_PluginBase):
                 if part.startswith("__Host-portal_token="):
                     return part.split("=", 1)[1].strip()
         return raw
+
+    @staticmethod
+    def _jwt_claims(token: str) -> dict:
+        """解析 JWT payload（不校验签名），用于提示过期时间。"""
+        try:
+            parts = (token or "").split(".")
+            if len(parts) < 2:
+                return {}
+            payload = parts[1] + "=" * (-len(parts[1]) % 4)
+            data = json.loads(base64.urlsafe_b64decode(payload))
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
+    def _token_expiry_note(self) -> str:
+        claims = self._jwt_claims(self._token)
+        exp = claims.get("exp")
+        if not isinstance(exp, (int, float)):
+            return ""
+        remain = float(exp) - time.time()
+        exp_str = datetime.fromtimestamp(int(exp)).strftime("%Y-%m-%d %H:%M:%S")
+        if remain <= 0:
+            return f"Token 已于 {exp_str} 过期，请重新从浏览器复制"
+        days = remain / 86400
+        return f"Token 将于 {exp_str} 过期（剩余 {days:.1f} 天）"
+
+    def _describe_api_error(self, resp: Optional[dict], fallback: str = "请求失败") -> str:
+        if not resp:
+            return self._last_error or fallback
+        code = str(resp.get("code") or "")
+        if code in self.AUTH_FAIL_CODES:
+            note = self._token_expiry_note()
+            return f"{self.AUTH_FAIL_CODES[code]}" + (f"；{note}" if note else "")
+        msg = str(resp.get("msg") or "").strip()
+        status = resp.get("status")
+        if code and msg:
+            return f"{code}：{msg}" + (f"（HTTP {status}）" if status else "")
+        if code:
+            return f"{code}" + (f"（HTTP {status}）" if status else "")
+        if msg:
+            return msg
+        if status:
+            return f"HTTP {status}"
+        return fallback
 
     def get_state(self) -> bool:
         return bool(self._enabled and self._token)
@@ -301,10 +358,12 @@ class Dian115Sign(_PluginBase):
         )
         if r.status_code != 200:
             logger.warning(f"癫影 browser-challenge 失败：HTTP {r.status_code}")
+            self._last_error = f"browser-challenge 失败：HTTP {r.status_code}"
             return None
         data = r.json() or {}
         if data.get("code") != "ok" or not data.get("proof"):
             logger.warning(f"癫影 browser-challenge 返回异常：{data}")
+            self._last_error = self._describe_api_error(data, "browser-challenge 返回异常")
             return None
         self._proof = data["proof"]
         ttl = int(data.get("ttl") or 600)
@@ -337,10 +396,12 @@ class Dian115Sign(_PluginBase):
         )
         if r.status_code != 200:
             logger.warning(f"癫影 browser-session 失败：HTTP {r.status_code}")
+            self._last_error = f"browser-session 失败：HTTP {r.status_code}"
             return False
         data = r.json() or {}
         if data.get("code") != "ok":
             logger.warning(f"癫影 browser-session 返回异常：{data}")
+            self._last_error = self._describe_api_error(data, "browser-session 返回异常")
             return False
         server_ms = data.get("server_time_ms")
         if server_ms:
@@ -368,8 +429,8 @@ class Dian115Sign(_PluginBase):
         })
         return headers
 
-    def _request(self, method: str, path: str) -> Optional[dict]:
-        """带签名发起 API GET/POST"""
+    def _request(self, method: str, path: str, replay: bool = True) -> Optional[dict]:
+        """带签名发起 API GET/POST。遇到 browser_proof_* 时重跑 challenge+session 再重试一次。"""
         if not self._ensure_session():
             return None
         headers = self._signed_headers(method, path)
@@ -381,15 +442,29 @@ class Dian115Sign(_PluginBase):
                 r = self._http().get(url, headers=headers, timeout=15)
         except Exception as e:
             logger.error(f"癫影请求异常 {path}：{e}")
+            self._last_error = f"请求异常：{e}"
             return None
         if r.status_code == 403 and "blocked" in r.text.lower():
             logger.warning(f"癫影请求被 WAF 拦截：{path}")
+            self._last_error = "被 WAF 拦截（出口 IP 或指纹被拦）"
             return None
         try:
-            return {"status": r.status_code, **(r.json() or {})}
+            data = {"status": r.status_code, **(r.json() or {})}
         except Exception:
             logger.warning(f"癫影响应非 JSON：{path} HTTP {r.status_code}")
+            self._last_error = f"响应非 JSON：HTTP {r.status_code}"
             return None
+        code = str(data.get("code") or "")
+        if replay and code in self.PROOF_RETRY_CODES:
+            logger.info(f"癫影 {code}，刷新 browser-session 后重试 {path}")
+            self._proof = None
+            self._priv_key = None
+            self._session_expires_at = 0
+            return self._request(method, path, replay=False)
+        if code and code != "ok":
+            self._last_error = self._describe_api_error(data)
+            logger.warning(f"癫影 {path} 失败：{self._last_error}")
+        return data
 
     # ======================== 业务接口 ========================
 
@@ -423,7 +498,7 @@ class Dian115Sign(_PluginBase):
 
         me_before = self._fetch_me()
         if me_before is None:
-            return {"ok": False, "msg": "Token 无效或网络被拦截", "date": today}
+            return {"ok": False, "msg": self._last_error or "Token 无效或网络被拦截", "date": today}
 
         if str(me_before.get("last_signin_date") or "") >= today:
             record = {
@@ -456,14 +531,35 @@ class Dian115Sign(_PluginBase):
             return {"ok": False, "msg": f"请求异常：{e}", "date": today}
 
         if r.status_code == 403 and "blocked" in r.text.lower():
-            return {"ok": False, "msg": "被 WAF 拦截", "date": today}
+            return {"ok": False, "msg": "被 WAF 拦截（出口 IP 或指纹被拦）", "date": today}
 
         try:
             data = r.json() or {}
         except Exception:
             return {"ok": False, "msg": f"响应解析失败 HTTP {r.status_code}", "date": today}
 
-        if r.status_code == 409 or data.get("code") == "already_signed":
+        code = str(data.get("code") or "")
+        if code in self.PROOF_RETRY_CODES:
+            logger.info(f"癫影签到 {code}，刷新 browser-session 后重试")
+            self._proof = None
+            self._priv_key = None
+            self._session_expires_at = 0
+            if not self._ensure_session():
+                return {"ok": False, "msg": self._last_error or "browser-session 刷新失败", "date": today}
+            headers = self._signed_headers("POST", path)
+            try:
+                r = self._http().post(
+                    f"{self.BASE_URL}{path}",
+                    json=body,
+                    headers=headers,
+                    timeout=15,
+                )
+                data = r.json() or {}
+                code = str(data.get("code") or "")
+            except Exception as e:
+                return {"ok": False, "msg": f"重试请求异常：{e}", "date": today}
+
+        if r.status_code == 409 or code == "already_signed":
             record = {
                 "date": today,
                 "time": datetime.now().strftime("%H:%M:%S"),
@@ -478,8 +574,8 @@ class Dian115Sign(_PluginBase):
             self._append_record(record)
             return {"ok": True, "already": True, "msg": "今日已签到", **record}
 
-        if r.status_code != 200 or data.get("code") == "error":
-            msg = data.get("msg") or f"HTTP {r.status_code}"
+        if r.status_code != 200 or data.get("code") == "error" or (code and code != "ok"):
+            msg = self._describe_api_error({"status": r.status_code, **data}, f"HTTP {r.status_code}")
             return {"ok": False, "msg": msg, "date": today}
 
         award = int(data.get("award") or 0)
@@ -526,6 +622,11 @@ class Dian115Sign(_PluginBase):
         for attempt in range(max_retry + 1):
             result = self._do_sign(manual=manual)
             if result.get("ok"):
+                break
+            msg = str(result.get("msg") or "")
+            # 登录失效重试无意义，立即停
+            if any(k in msg for k in ("登录已失效", "登录已被吊销", "请先登录", "未登录")):
+                logger.error(f"癫影签到停止：{msg}")
                 break
             if attempt < max_retry:
                 logger.warning(f"癫影第 {attempt + 1} 次签到失败：{result.get('msg')}，稍后重试")
