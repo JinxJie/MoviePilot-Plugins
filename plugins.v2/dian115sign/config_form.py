@@ -63,9 +63,19 @@ def build_form() -> Tuple[List[dict], Dict[str, Any]]:
                                        hint="签到成功 / 已签到 / 失败时发送消息通知", persistent_hint=True)),
                     ]),
                     row([
-                        col(12, textfield("token", "🔑 登录 Token（__Host-portal_token）",
-                                           placeholder="粘贴浏览器 Cookie 中的 __Host-portal_token 值",
-                                           hint="登录 m.dian115.com 后按 F12 → Application → Cookies 中复制；站点 JWT 会过期（常见几天到十几天），失效后需重新登录再复制",
+                        col(6, textfield("email", "📧 登录邮箱",
+                                           placeholder="you@example.com",
+                                           hint="站点邮箱账号；填了邮箱+密码后，Token 过期会自动登录续期",
+                                           persistent_hint=True, clearable=True)),
+                        col(6, textfield("password", "🔒 登录密码",
+                                           placeholder="登录密码",
+                                           hint="仅保存在 MoviePilot 插件配置中，用于自动换新 Token",
+                                           persistent_hint=True, clearable=True, type="password")),
+                    ]),
+                    row([
+                        col(12, textfield("token", "🔑 登录 Token（可选）",
+                                           placeholder="可留空；也可粘贴 __Host-portal_token",
+                                           hint="有邮箱密码时可留空。手动粘贴仍可用；站点 JWT 实测约 1 天，插件会在过期前自动续期",
                                            persistent_hint=True, clearable=True)),
                     ]),
                 ]),
@@ -105,7 +115,7 @@ def build_form() -> Tuple[List[dict], Dict[str, Any]]:
                     ]),
                 ]),
 
-                alert("info", "Token 获取方法：电脑浏览器打开 m.dian115.com 并登录 → F12 开发者工具 → Application（应用）→ Cookies → 复制 __Host-portal_token 的值。站点登录态会过期，失效后重新登录再复制即可。"),
+                alert("info", "推荐填邮箱+密码：插件会在 Token 过期前自动登录续期（站点 JWT 实测约 1 天）。也可仍用浏览器 Cookie 里的 __Host-portal_token。当前站点人机验证（Turnstile）为关闭状态；若日后打开，自动登录可能失败。"),
             ],
         },
     ]
@@ -113,6 +123,8 @@ def build_form() -> Tuple[List[dict], Dict[str, Any]]:
     return form, {
         "enabled": False,
         "token": "",
+        "email": "",
+        "password": "",
         "lucky_mode": False,
         "cron": "30 9 * * *",
         "retry": 3,

@@ -74,12 +74,14 @@ class Dian115Sign(_PluginBase):
 
     # browser-session 有效期（秒），提前 5 分钟刷新
     SESSION_TTL_MARGIN = 300
+    # JWT 剩余不足此时长则用账号密码续期（站点实测约 1 天）
+    TOKEN_REFRESH_MARGIN = 12 * 3600
 
-    # 站点前端 ya{} 对照：登录态失效（需重新复制 Cookie）
+    # 站点前端 ya{} 对照：登录态失效
     AUTH_FAIL_CODES = {
-        "no_token": "未登录（请求未带上 Token）",
-        "invalid_token": "登录已失效，请重新从浏览器复制 Token",
-        "token_revoked": "登录已被吊销，请重新登录后复制 Token",
+        "no_token": "未登录",
+        "invalid_token": "登录已失效",
+        "token_revoked": "登录已被吊销",
         "unauthorized": "请先登录",
     }
     PROOF_RETRY_CODES = ("browser_proof_required", "browser_proof_invalid")
@@ -106,6 +108,8 @@ class Dian115Sign(_PluginBase):
         if config:
             self._enabled = config.get("enabled") or False
             self._token = self._extract_token((config.get("token") or "").strip())
+            self._email = (config.get("email") or "").strip()
+            self._password = config.get("password") or ""
             self._lucky_mode = bool(config.get("lucky_mode"))
             note = self._token_expiry_note()
             if note:
@@ -133,6 +137,8 @@ class Dian115Sign(_PluginBase):
         self.update_config({
             "enabled": self._enabled,
             "token": self._token,
+            "email": getattr(self, "_email", ""),
+            "password": getattr(self, "_password", ""),
             "lucky_mode": self._lucky_mode,
             "cron": self._cron,
             "notify": self._notify,
@@ -151,11 +157,12 @@ class Dian115Sign(_PluginBase):
         """兼容整段 Cookie 或纯 token 值，自动提取 __Host-portal_token"""
         if not raw:
             return ""
-        if "eyJ" in raw and "__Host-portal_token=" in raw:
-            for part in raw.split(";"):
+        if "eyJ" in raw:
+            for part in raw.replace(",", ";").split(";"):
                 part = part.strip()
-                if part.startswith("__Host-portal_token="):
-                    return part.split("=", 1)[1].strip()
+                for prefix in ("__Host-portal_token=", "portal_token="):
+                    if part.startswith(prefix):
+                        return part.split("=", 1)[1].strip()
         return raw
 
     @staticmethod
@@ -179,9 +186,20 @@ class Dian115Sign(_PluginBase):
         remain = float(exp) - time.time()
         exp_str = datetime.fromtimestamp(int(exp)).strftime("%Y-%m-%d %H:%M:%S")
         if remain <= 0:
-            return f"Token 已于 {exp_str} 过期，请重新从浏览器复制"
-        days = remain / 86400
-        return f"Token 将于 {exp_str} 过期（剩余 {days:.1f} 天）"
+            return f"Token 已于 {exp_str} 过期"
+        hours = remain / 3600
+        if hours < 24:
+            return f"Token 将于 {exp_str} 过期（剩余 {hours:.1f} 小时）"
+        return f"Token 将于 {exp_str} 过期（剩余 {hours / 24:.1f} 天）"
+
+    def _token_remaining(self) -> Optional[float]:
+        exp = self._jwt_claims(self._token).get("exp")
+        if not isinstance(exp, (int, float)):
+            return None
+        return float(exp) - time.time()
+
+    def _has_password(self) -> bool:
+        return bool(getattr(self, "_email", "") and getattr(self, "_password", ""))
 
     def _describe_api_error(self, resp: Optional[dict], fallback: str = "请求失败") -> str:
         if not resp:
@@ -203,7 +221,7 @@ class Dian115Sign(_PluginBase):
         return fallback
 
     def get_state(self) -> bool:
-        return bool(self._enabled and self._token)
+        return bool(self._enabled and (self._token or self._has_password()))
 
     # ======================== 命令 / API / 服务 ========================
 
@@ -317,18 +335,18 @@ class Dian115Sign(_PluginBase):
         return (os.environ.get("PROXY_HOST") or os.environ.get("https_proxy") or
                 os.environ.get("HTTPS_PROXY") or "").split(",")[0].strip() or ""
 
-    def _base_headers(self) -> dict:
+    def _base_headers(self, referer_path: str = "/me/signin") -> dict:
         headers = {
             "Accept": "application/json, text/plain, */*",
             "Accept-Language": "zh-CN,zh;q=0.9",
             "Sec-Fetch-Dest": "empty",
             "Sec-Fetch-Mode": "cors",
             "Sec-Fetch-Site": "same-origin",
-            "Referer": f"{self.BASE_URL}/me/signin",
-            "Cookie": f"__Host-portal_token={self._token}",
+            "Referer": f"{self.BASE_URL}{referer_path}",
+            "X-Requested-With": "XMLHttpRequest",
         }
-        if not HAS_CRYPTO:
-            return headers
+        if self._token:
+            headers["Cookie"] = f"__Host-portal_token={self._token}"
         return headers
 
     def _b64u(self, raw: bytes) -> str:
@@ -410,18 +428,18 @@ class Dian115Sign(_PluginBase):
         self._session_expires_at = time.time() + max(ttl - self.SESSION_TTL_MARGIN, 60)
         return True
 
-    def _signed_headers(self, method: str, path: str) -> dict:
+    def _signed_headers(self, method: str, path: str, current_path: str = "/me/signin") -> dict:
         """生成带签名请求头"""
         ts = str(int(time.time() * 1000) + self._clock_skew_ms)
         nonce = self._b64u(os.urandom(18))
         message = f"portal-browser-request/v1\n{method.upper()}\n{path}\n{ts}\n{nonce}"
         signature = self._priv_key.sign(message.encode(), ec.ECDSA(_crypto_hashes.SHA256()))
-        headers = self._base_headers()
+        headers = self._base_headers(referer_path=current_path)
         headers.update({
             "Content-Type": "application/json",
             "Origin": self.BASE_URL,
             "X-Portal-Visitor-ID": self._visitor_id,
-            "X-Portal-Current-Path": "/me/signin",
+            "X-Portal-Current-Path": current_path,
             "X-Portal-Browser-Proof": self._proof or "",
             "X-Portal-Browser-TS": ts,
             "X-Portal-Browser-Nonce": nonce,
@@ -429,15 +447,18 @@ class Dian115Sign(_PluginBase):
         })
         return headers
 
-    def _request(self, method: str, path: str, replay: bool = True) -> Optional[dict]:
+    def _request(self, method: str, path: str, replay: bool = True, json_body: Optional[dict] = None) -> Optional[dict]:
         """带签名发起 API GET/POST。遇到 browser_proof_* 时重跑 challenge+session 再重试一次。"""
         if not self._ensure_session():
             return None
-        headers = self._signed_headers(method, path)
+        headers = self._signed_headers(
+            method, path,
+            current_path="/login" if path.endswith("/auth/login") else "/me/signin",
+        )
         url = f"{self.BASE_URL}{path}"
         try:
             if method.upper() == "POST":
-                r = self._http().post(url, json={}, headers=headers, timeout=15)
+                r = self._http().post(url, json=json_body if json_body is not None else {}, headers=headers, timeout=15)
             else:
                 r = self._http().get(url, headers=headers, timeout=15)
         except Exception as e:
@@ -448,6 +469,9 @@ class Dian115Sign(_PluginBase):
             logger.warning(f"癫影请求被 WAF 拦截：{path}")
             self._last_error = "被 WAF 拦截（出口 IP 或指纹被拦）"
             return None
+        token = self._token_from_response(r)
+        if token:
+            self._apply_token(token, persist=True)
         try:
             data = {"status": r.status_code, **(r.json() or {})}
         except Exception:
@@ -460,11 +484,140 @@ class Dian115Sign(_PluginBase):
             self._proof = None
             self._priv_key = None
             self._session_expires_at = 0
-            return self._request(method, path, replay=False)
+            return self._request(method, path, replay=False, json_body=json_body)
         if code and code != "ok":
             self._last_error = self._describe_api_error(data)
             logger.warning(f"癫影 {path} 失败：{self._last_error}")
         return data
+
+    def _token_from_response(self, r) -> str:
+        """从 Set-Cookie / 会话 Cookie / JSON 体里抠 __Host-portal_token。"""
+        def from_jar(jar) -> str:
+            if not jar:
+                return ""
+            for key in ("__Host-portal_token", "portal_token"):
+                try:
+                    val = jar.get(key) if hasattr(jar, "get") else None
+                    if val:
+                        return str(val)
+                except Exception:
+                    pass
+            try:
+                for c in jar:
+                    name = getattr(c, "name", "") or ""
+                    value = getattr(c, "value", "") or ""
+                    if "portal_token" in name and value:
+                        return value
+            except Exception:
+                pass
+            try:
+                items = jar.items() if hasattr(jar, "items") else []
+                for name, value in items:
+                    if "portal_token" in str(name) and value:
+                        return str(value)
+            except Exception:
+                pass
+            return ""
+
+        found = from_jar(getattr(r, "cookies", None)) or from_jar(getattr(self._http(), "cookies", None))
+        if found:
+            return found
+        chunks = []
+        try:
+            sc = r.headers.get("set-cookie") or r.headers.get("Set-Cookie") or ""
+            if sc:
+                chunks.append(sc)
+        except Exception:
+            pass
+        blob = "; ".join(chunks)
+        extracted = self._extract_token(blob)
+        if extracted and extracted != blob:
+            return extracted
+        try:
+            data = r.json() or {}
+        except Exception:
+            data = {}
+        return self._token_from_obj(data)
+
+    def _token_from_obj(self, obj) -> str:
+        if isinstance(obj, dict):
+            for key in ("token", "portal_token", "__Host-portal_token", "access_token", "jwt"):
+                val = obj.get(key)
+                if isinstance(val, str) and val.count(".") >= 2 and "eyJ" in val:
+                    return val
+            for val in obj.values():
+                found = self._token_from_obj(val)
+                if found:
+                    return found
+        elif isinstance(obj, list):
+            for val in obj:
+                found = self._token_from_obj(val)
+                if found:
+                    return found
+        elif isinstance(obj, str) and obj.count(".") >= 2 and "eyJ" in obj:
+            return self._extract_token(obj) or obj
+        return ""
+
+    def _apply_token(self, token: str, persist: bool = True):
+        token = self._extract_token(token) or token
+        if not token or token == self._token:
+            return
+        self._token = token
+        note = self._token_expiry_note()
+        logger.info("癫影已刷新登录 Token" + (f"：{note}" if note else ""))
+        if persist:
+            try:
+                self.__update_config()
+            except Exception as e:
+                logger.warning(f"癫影 Token 写回配置失败：{e}")
+
+    def _login_with_password(self) -> bool:
+        """POST /auth/login，用账号密码换新 JWT。"""
+        if not self._has_password():
+            return False
+        if not self._ensure_session():
+            return False
+        policy = self._request("GET", f"{self.API_BASE}/auth/policy")
+        if policy and policy.get("turnstile_enabled"):
+            self._last_error = "站点已开启人机验证（Turnstile），暂无法自动登录，请改用浏览器 Token"
+            logger.error(f"癫影 {self._last_error}")
+            return False
+        path = f"{self.API_BASE}/auth/login"
+        body = {
+            "email": self._email.strip(),
+            "password": self._password,
+        }
+        # 当前站点 policy.turnstile_enabled=false；若日后打开，登录会返回 turnstile_failed
+        resp = self._request("POST", path, json_body=body)
+        if not resp:
+            return False
+        code = str(resp.get("code") or "")
+        if code != "ok":
+            self._last_error = self._describe_api_error(resp, "登录失败")
+            logger.error(f"癫影账号登录失败：{self._last_error}")
+            return False
+        if not self._token:
+            self._last_error = "登录成功但未拿到 Token"
+            logger.error("癫影登录成功但响应中没有 __Host-portal_token")
+            return False
+        return True
+
+    def _ensure_token(self, force: bool = False) -> bool:
+        """Token 缺失/过期/即将过期时，用账号密码续期。"""
+        remain = self._token_remaining()
+        alive = bool(self._token) and (remain is None or remain > 0)
+        soon = remain is not None and remain <= self.TOKEN_REFRESH_MARGIN
+        if not force and alive and not soon:
+            return True
+        if not self._has_password():
+            if not alive:
+                self._last_error = self._last_error or "登录已失效，且未配置邮箱密码，无法自动续期"
+            return alive
+        if force or not alive:
+            logger.info("癫影登录态失效，使用邮箱密码重新登录")
+        else:
+            logger.info("癫影 Token 即将过期，使用邮箱密码续期")
+        return self._login_with_password()
 
     # ======================== 业务接口 ========================
 
@@ -609,13 +762,24 @@ class Dian115Sign(_PluginBase):
 
     def _sign_job(self, manual: bool = False):
         """定时签到任务入口"""
-        if not self._token:
-            logger.warning("癫影签到：未配置 Token，无法执行签到")
+        if not self._token and not self._has_password():
+            logger.warning("癫影签到：未配置 Token 或邮箱密码，无法执行签到")
             return
-        # 手动测试仅需 Token；定时计划才要求「启用插件」开关
+        # 手动测试不要求「启用插件」开关
         if not manual and not self._enabled:
             return
         logger.info(f"癫影自动签到开始（{'手动' if manual else '定时'}），模式：{'运气签' if self._mode == self.SIGN_MODE_LUCKY else '普通签'}")
+
+        if not self._ensure_token():
+            result = {
+                "ok": False,
+                "msg": self._last_error or "登录失败",
+                "date": datetime.now().strftime("%Y-%m-%d"),
+            }
+            logger.error(f"癫影签到最终失败：{result['msg']}")
+            if self._notify:
+                self._send_notify(result)
+            return
 
         max_retry = max(int(self._retry or 0), 0)
         result = {}
@@ -624,15 +788,22 @@ class Dian115Sign(_PluginBase):
             if result.get("ok"):
                 break
             msg = str(result.get("msg") or "")
-            # 登录失效重试无意义，立即停
-            if any(k in msg for k in ("登录已失效", "登录已被吊销", "请先登录", "未登录")):
+            auth_dead = any(k in msg for k in ("登录已失效", "登录已被吊销", "请先登录", "未登录"))
+            cred_dead = any(k in msg for k in ("邮箱或密码错误", "password_mismatch", "turnstile", "人机验证"))
+            if auth_dead and self._has_password():
+                if self._ensure_token(force=True):
+                    logger.info("癫影已重新登录，重试签到")
+                    result = self._do_sign(manual=manual)
+                    if result.get("ok"):
+                        break
+                logger.error(f"癫影签到停止：{result.get('msg')}")
+                break
+            if auth_dead or cred_dead:
                 logger.error(f"癫影签到停止：{msg}")
                 break
             if attempt < max_retry:
                 logger.warning(f"癫影第 {attempt + 1} 次签到失败：{result.get('msg')}，稍后重试")
                 time.sleep(60)
-        else:
-            pass
 
         if result.get("ok"):
             logger.info(f"癫影签到完成：{result.get('msg')}")
