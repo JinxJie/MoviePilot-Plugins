@@ -61,23 +61,28 @@ class NodeSeek(_PluginBase):
     # NodeSeek 签到 API（POST）
     SIGN_API = "https://www.nodeseek.com/api/attendance"
 
-    # 默认浏览器 User-Agent
+    # curl_cffi 指纹回退链：老目标优先（容器里中年版本会接受 chrome124 名但 TLS 仍旧，WAF 照拦）
+    IMPERSONATE_CHAIN = [
+        "chrome110", "chrome107", "chrome104", "chrome101",
+        "chrome99", "edge101", "safari15_5", "chrome124",
+    ]
+
+    # 与 chrome110 指纹对齐，不要写 136 头去配泛化 impersonate="chrome"
     DEFAULT_UA = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/136.0.0.0 Safari/537.36"
+        "Chrome/110.0.0.0 Safari/537.36"
     )
 
-    # 完整浏览器请求头（缺 Origin/Referer 等会被 WAF 拦截）
+    # 完整浏览器请求头（缺 Origin/Referer/Sec-Fetch 会被 WAF 拦截）
+    # 不手写 Content-Length / Accept-Encoding，交给 curl_cffi
     SIGN_HEADERS = {
-        "Accept": "*/*",
-        "Accept-Encoding": "gzip, deflate, br, zstd",
+        "Accept": "application/json, text/plain, */*",
         "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-        "Content-Length": "0",
         "Content-Type": "application/json",
         "Origin": "https://www.nodeseek.com",
         "Referer": "https://www.nodeseek.com/board",
-        "Sec-CH-UA": '"Chromium";v="136", "Not:A-Brand";v="24", "Google Chrome";v="136"',
+        "Sec-CH-UA": '"Chromium";v="110", "Not A(Brand";v="24", "Google Chrome";v="110"',
         "Sec-CH-UA-Mobile": "?0",
         "Sec-CH-UA-Platform": '"Windows"',
         "Sec-Fetch-Dest": "empty",
@@ -95,7 +100,7 @@ class NodeSeek(_PluginBase):
         self._cookie = ""
         self._cron = "30 0 * * *"          # 默认每天 00:30（刷新后可抢前排排名）
         self._notify = True
-        self._use_proxy = False
+        self._use_proxy = True
         self._ns_random = False
         self._cookie_first = True
         self._accounts = ""
@@ -115,7 +120,7 @@ class NodeSeek(_PluginBase):
             self._cookie = (config.get("cookie") or "").strip()
             self._cron = config.get("cron") or "30 0 * * *"
             self._notify = config.get("notify", True)
-            self._use_proxy = config.get("use_proxy", False)
+            self._use_proxy = True if config.get("use_proxy") is None else bool(config.get("use_proxy"))
             self._ns_random = config.get("ns_random", False)
             self._cookie_first = config.get("cookie_first", True)
             self._accounts = (config.get("accounts") or "").strip()
@@ -482,17 +487,15 @@ class NodeSeek(_PluginBase):
         status = getattr(response, "status_code", None)
         ct = (response.headers.get("Content-Type") or "").lower()
 
-        # 非 JSON（Cloudflare 挑战页 / WAF 拦截）
+        # 非 JSON（Cloudflare 挑战页 / WAF 拦截）——这不是 Cookie 失效，不要触发账密登录
         if "application/json" not in ct:
             text = (response.text or "")[:500]
-            if "Just a moment" in text or "cf-challenge" in text:
-                result["message"] = "Cloudflare 拦截（Just a moment），Cookie 可能已失效"
-                result["cookie_invalid"] = True
+            if "Just a moment" in text or "cf-challenge" in text or "challenge-platform" in text:
+                result["message"] = "Cloudflare 拦截（挑战页），请确认系统代理出口未被拉黑"
             elif "high risk action" in text:
-                result["message"] = "风控拦截（high risk action），Cookie 可能已失效"
-                result["cookie_invalid"] = True
+                result["message"] = "风控拦截（high risk action）"
             elif status == 403:
-                result["message"] = f"被服务器拦截（HTTP 403），可能 Cookie 过期或 IP 风控"
+                result["message"] = "被服务器拦截（HTTP 403 HTML），多半是出口 IP / 指纹，不是 Cookie"
             else:
                 result["message"] = f"非 JSON 响应（HTTP {status}）"
             return result
@@ -631,29 +634,41 @@ class NodeSeek(_PluginBase):
             logger.error("NodeSeek：自动登录刷新 Cookie 失败：%s", e)
             return False
 
+    def _pick_impersonate(self) -> str:
+        """选一个当前 curl_cffi 支持的指纹，老目标优先。"""
+        if not HAS_CURL_CFFI or not curl_requests:
+            raise RuntimeError("curl_cffi 未安装")
+        last_err = None
+        for target in self.IMPERSONATE_CHAIN:
+            try:
+                sess = curl_requests.Session(impersonate=target)
+                sess.close()
+                return target
+            except Exception as e:
+                last_err = e
+                continue
+        raise RuntimeError(f"curl_cffi 无可用浏览器指纹：{last_err}")
+
     def _smart_post(self, url: str, headers: dict, data=None, proxies=None, timeout: int = 30):
         """
         智能 POST：
-        1) curl_cffi（Chrome 指纹，过 Cloudflare）
-        2) requests（兜底）
+        1) curl_cffi（chrome110 起回退，过 Cloudflare）
+        2) requests 仅在 curl_cffi 不可用时兜底（几乎一定被拦）
         """
         if HAS_CURL_CFFI and curl_requests:
-            try:
-                logger.info("NodeSeek 签到：使用 curl_cffi 发送请求（Chrome 指纹）")
-                resp = curl_requests.post(
-                    url, headers=headers, data=data,
-                    impersonate="chrome", proxies=proxies, timeout=timeout,
-                )
-                ct = (resp.headers.get("Content-Type") or "").lower()
-                if resp.status_code not in (400, 403) or "application/json" in ct:
-                    return resp
-                logger.warning(f"curl_cffi 响应异常：HTTP {resp.status_code} {ct}")
-            except Exception as e:
-                logger.warning(f"curl_cffi 请求失败，将回退 requests：{e}")
+            target = self._pick_impersonate()
+            logger.info(f"NodeSeek 签到：使用 curl_cffi 发送请求（浏览器指纹：{target}）")
+            resp = curl_requests.post(
+                url, headers=headers, data=data,
+                impersonate=target, proxies=proxies, timeout=timeout,
+            )
+            ct = (resp.headers.get("Content-Type") or "").lower()
+            if resp.status_code in (400, 403) and "application/json" not in ct:
+                logger.warning(f"curl_cffi {target} 响应异常：HTTP {resp.status_code} {ct}")
+            return resp
 
-        # requests 兜底
         import requests
-        logger.warning("NodeSeek 签到：使用 requests 兜底（无浏览器指纹，可能被 Cloudflare 拦截）")
+        logger.warning("NodeSeek 签到：未安装 curl_cffi，使用 requests 兜底（可能被 Cloudflare 拦截）")
         resp = requests.post(
             url, headers=headers, data=data, proxies=proxies, timeout=timeout
         )
@@ -662,43 +677,38 @@ class NodeSeek(_PluginBase):
             raise Exception(f"requests 被拦截：HTTP {resp.status_code}（建议安装 curl_cffi）")
         return resp
 
-    def _get_proxies(self):
-        """获取并规范化系统代理，兼容字符串、字典和空值。"""
-        if not self._use_proxy:
-            return None
+    @staticmethod
+    def _system_proxy() -> str:
+        """读取 MoviePilot 系统代理：PROXY.host / 字符串 / 字典 / 环境变量。"""
         try:
             configured = getattr(settings, "PROXY", None)
-            if not configured:
-                logger.warning("已启用代理，但系统未配置代理")
-                return None
-
-            # MoviePilot 不同版本可能返回代理 URL 或 {http, https} 字典。
-            if isinstance(configured, str):
-                proxy = configured.strip()
-                if not proxy:
-                    logger.warning("已启用代理，但系统代理地址为空")
-                    return None
-                return {"http": proxy, "https": proxy}
-
+            host = getattr(configured, "host", None)
+            if host:
+                return str(host).strip()
+            if isinstance(configured, str) and configured.strip():
+                return configured.strip()
             if isinstance(configured, dict):
-                proxies = {}
-                for scheme in ("http", "https"):
-                    value = configured.get(scheme)
+                for key in ("https", "http", "proxy", "all", "host"):
+                    value = configured.get(key)
                     if isinstance(value, str) and value.strip():
-                        proxies[scheme] = value.strip()
-                # 兼容仅配置 proxy 或 all 的格式。
-                fallback = configured.get("proxy") or configured.get("all")
-                if isinstance(fallback, str) and fallback.strip():
-                    fallback = fallback.strip()
-                    proxies.setdefault("http", fallback)
-                    proxies.setdefault("https", fallback)
-                if proxies:
-                    return proxies
-
-            logger.warning("已启用代理，但系统代理格式无法识别（仅支持字符串或 URL 字典）")
+                        return value.strip()
         except Exception as e:
-            logger.error(f"获取系统代理设置出错：{type(e).__name__}: {e}")
-        return None
+            logger.debug(f"NodeSeek 读取系统代理失败：{e}")
+        import os
+        return (os.environ.get("PROXY_HOST") or os.environ.get("https_proxy") or
+                os.environ.get("HTTPS_PROXY") or "").split(",")[0].strip() or ""
+
+    def _get_proxies(self):
+        """获取并规范化系统代理。"""
+        if not self._use_proxy:
+            logger.info("NodeSeek 签到：未使用系统代理（直连）")
+            return None
+        proxy = self._system_proxy()
+        if not proxy:
+            logger.warning("已启用系统代理，但 MoviePilot 未配置代理服务器，将直连")
+            return None
+        logger.info(f"NodeSeek 签到：使用系统代理：{proxy}")
+        return {"http": proxy, "https": proxy}
 
     # ======================== 数据存储 ========================
 

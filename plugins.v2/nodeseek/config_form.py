@@ -112,7 +112,7 @@ def build_form() -> Tuple[List[dict], Dict[str, Any]]:
                                     "props": {
                                         "model": "use_proxy",
                                         "label": "使用系统代理",
-                                        "hint": "仅在当前网络需要经 MoviePilot 代理访问站点时打开；否则保持关闭。",
+                                        "hint": "默认开启。MoviePilot 宿主出口常被 Cloudflare 拉黑，走系统代理（settings.PROXY）再签到。",
                                         "persistent-hint": True,
                                     },
                                 }
@@ -172,7 +172,7 @@ def build_form() -> Tuple[List[dict], Dict[str, Any]]:
         "cookie": "",
         "cron": "30 0 * * *",
         "notify": True,
-        "use_proxy": False,
+        "use_proxy": True,
         "ns_random": False,
         "cookie_first": True,
         "accounts": "",
