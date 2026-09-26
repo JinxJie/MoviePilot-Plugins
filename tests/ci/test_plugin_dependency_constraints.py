@@ -11,7 +11,11 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 V3_MANIFESTS = sorted((REPO_ROOT / "plugins.v3").glob("*/pyproject.toml"))
 
 
-@pytest.mark.parametrize("manifest", V3_MANIFESTS)
+@pytest.mark.parametrize(
+    "manifest",
+    V3_MANIFESTS
+    or [pytest.param(None, marks=pytest.mark.skip(reason="本仓库无 V3 插件"))],
+)
 def test_v3_manifest_preserves_host_runtime(manifest: Path) -> None:
     """插件清单不得要求覆盖主程序直接或传递运行依赖。"""
     protected_packages = PluginHelper._PluginHelper__get_protected_runtime_packages()

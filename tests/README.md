@@ -11,7 +11,6 @@ tests/
 ├─ conftest.py     pytest 引导：按本次运行目标选择 v1/v2/v3 插件环境并注册网络守卫
 ├─ v3/             v3 插件（plugins.v3/）单测；每个插件按插件 ID 建子目录
 ├─ v2/             v2 插件（plugins.v2/）单测；每个插件按插件 ID 建子目录
-│  └─ agenttokens/
 └─ v1/             v1 插件（plugins/）单测；每个插件按插件 ID 建子目录
 ```
 
@@ -58,7 +57,7 @@ MoviePilot 环境；默认 V3 回归只承诺覆盖仍声明兼容 V3 的 V2 测
 ## 新增用例
 
 1. 放到对应代际的插件独立目录：`tests/<v1|v2|v3>/<plugin_id>/`，例如
-   `tests/v2/agenttokens/`；所有插件都按插件 ID 建目录，不把用例文件直接平铺在
+   `tests/v2/hhlottery/`；所有插件都按插件 ID 建目录，不把用例文件直接平铺在
    `tests/v1/` 或 `tests/v2/` 下；文件名使用 `test_*.py`，在插件独立目录内不再重复插件名前缀；
 2. 使用 `app.plugins.<plugin_id>` 生产路径导入插件；根 conftest 会按本次运行目标在用例导入前完成后端与插件目录注入；
 3. 使用 pytest 风格编写测试：普通函数或测试类均可，断言使用 `assert`；不要新增
