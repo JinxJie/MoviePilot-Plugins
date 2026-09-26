@@ -134,7 +134,7 @@ def build_form() -> Tuple[List[dict], Dict[str, Any]]:
                                         "model": "cookie",
                                         "label": "Cookie",
                                         "placeholder": "粘贴 NodeSeek 账号的 Cookie 字符串",
-                                        "hint": "这是首选登录凭据；有效期间插件不会主动切换到账号密码。",
+                                        "hint": "首选凭据。复制 Cookie 时保留 nodeseek.com 字段即可；含 session= 时插件会自动忽略，避免触发 Cloudflare 挑战。",
                                         "clearable": True,
                                         "required": True,
                                     },

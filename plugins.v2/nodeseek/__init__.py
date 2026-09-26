@@ -424,20 +424,14 @@ class NodeSeek(_PluginBase):
                 self._notify_result(result, date, clock)
                 return result
 
-        headers = dict(self.SIGN_HEADERS)
-        headers["Cookie"] = self._cookie
         proxies = self._get_proxies()
-
         sign_url = self.SIGN_API + ("?random=true" if self._ns_random else "")
         logger.info("NodeSeek 签到模式：%s", "随机 1~11 鸡腿" if self._ns_random else "固定 5 鸡腿")
+        names = [k for k, _ in self._parse_cookie_pairs(self._cookie)]
+        if names:
+            logger.info("NodeSeek 签到：Cookie 字段：%s", ",".join(names))
         try:
-            response = self._smart_post(
-                url=sign_url,
-                headers=headers,
-                data=b"",
-                proxies=proxies,
-                timeout=30,
-            )
+            response = self._request_attendance(sign_url, self._cookie, proxies)
         except Exception as e:
             result["message"] = f"请求失败：{str(e)}"
             logger.error(f"NodeSeek 签到请求出错：{e}")
@@ -448,14 +442,7 @@ class NodeSeek(_PluginBase):
         result.update(self._parse_response(response))
         if result["cookie_invalid"] and self._cookie_first and self._refresh_cookie_if_needed():
             logger.info("NodeSeek：新 Cookie 已取得，重试签到一次")
-            headers["Cookie"] = self._cookie
-            response = self._smart_post(
-                url=sign_url,
-                headers=headers,
-                data=b"",
-                proxies=proxies,
-                timeout=30,
-            )
+            response = self._request_attendance(sign_url, self._cookie, proxies)
             result = {"success": False, "already": False, "cookie_invalid": False, "message": "", "gain": 0, "current": 0}
             result.update(self._parse_response(response))
         logger.info(
@@ -491,7 +478,7 @@ class NodeSeek(_PluginBase):
         if "application/json" not in ct:
             text = (response.text or "")[:500]
             if "Just a moment" in text or "cf-challenge" in text or "challenge-platform" in text:
-                result["message"] = "Cloudflare 拦截（挑战页），请确认系统代理出口未被拉黑"
+                result["message"] = "Cloudflare JS 挑战未通过（Cookie 含 session 字段时常见）"
             elif "high risk action" in text:
                 result["message"] = "风控拦截（high risk action）"
             elif status == 403:
@@ -563,6 +550,92 @@ class NodeSeek(_PluginBase):
             raise RuntimeError("验证码服务未返回 token")
         return token
 
+    def _browser_sign(self, url: str, cookie: str):
+        """在浏览器上下文中执行签到，用于过 Cloudflare JS 挑战。"""
+        try:
+            from cloakbrowser import launch_context
+        except Exception as e:
+            raise RuntimeError(
+                f"curl_cffi 无法过 Cloudflare JS 挑战，且 CloakBrowser 不可用：{e}"
+            ) from e
+
+        class _Resp:
+            def __init__(self, status_code: int, content_type: str, text: str):
+                self.status_code = status_code
+                self.headers = {"Content-Type": content_type or "text/html"}
+                self.text = text or ""
+
+            def json(self):
+                import json
+                return json.loads(self.text)
+
+        context = page = None
+        try:
+            logger.info("NodeSeek：使用 CloakBrowser 执行签到（过 JS 挑战）")
+            context = launch_context(headless=True)
+            page = context.new_page()
+            page.goto("https://www.nodeseek.com/", timeout=60000)
+            try:
+                page.wait_for_load_state("networkidle", timeout=30000)
+            except Exception:
+                pass
+            cookies = []
+            skipped = []
+            for name, value in self._parse_cookie_pairs(cookie):
+                if name.lower() == "session":
+                    skipped.append(name)
+                    continue
+                cookies.append({
+                    "name": name,
+                    "value": value,
+                    "domain": ".nodeseek.com",
+                    "path": "/",
+                })
+            if skipped:
+                logger.info("NodeSeek：浏览器签到忽略 Cookie 字段：%s", ",".join(skipped))
+            if cookies:
+                context.add_cookies(cookies)
+            result = page.evaluate(
+                """
+                async (url) => {
+                  const r = await fetch(url, {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: {
+                      'Accept': 'application/json, text/plain, */*',
+                      'Content-Type': 'application/json',
+                      'Origin': 'https://www.nodeseek.com',
+                      'Referer': 'https://www.nodeseek.com/board'
+                    },
+                    body: ''
+                  });
+                  let text = '';
+                  try { text = await r.text(); } catch (e) { text = ''; }
+                  return {
+                    status: r.status,
+                    ct: r.headers.get('content-type') || '',
+                    text
+                  };
+                }
+                """,
+                url,
+            ) or {}
+            names = []
+            for item in (context.cookies() or []):
+                name, domain = item.get("name"), item.get("domain", "")
+                if name and "nodeseek.com" in domain:
+                    names.append(name)
+            if names:
+                logger.info("NodeSeek：浏览器签到后 Cookie 字段：%s", ",".join(names))
+            return _Resp(int(result.get("status") or 0), result.get("ct") or "", result.get("text") or "")
+        finally:
+            try:
+                if page:
+                    page.close()
+            finally:
+                if context:
+                    context.close()
+
     def _browser_login(self, user: str, password: str) -> str:
         """在干净 CloakBrowser 上下文中登录，不注入旧 Cookie，返回新业务 Cookie。"""
         try:
@@ -601,12 +674,12 @@ class NodeSeek(_PluginBase):
             pairs = {}
             for item in (context.cookies() or []):
                 name, value, domain = item.get("name"), item.get("value"), item.get("domain", "")
-                if name and "nodeseek.com" in domain and name != "cf_clearance":
+                if name and "nodeseek.com" in domain:
                     pairs[name] = value
             if not pairs:
                 raise RuntimeError("登录成功但未取得 NodeSeek Cookie")
             cookie = "; ".join(f"{k}={v}" for k, v in pairs.items())
-            logger.info("NodeSeek：干净浏览器登录成功，已取得新的 Cookie 字段")
+            logger.info("NodeSeek：干净浏览器登录成功，已取得新 Cookie 字段：%s", ",".join(pairs.keys()))
             return cookie
         finally:
             try:
@@ -634,6 +707,39 @@ class NodeSeek(_PluginBase):
             logger.error("NodeSeek：自动登录刷新 Cookie 失败：%s", e)
             return False
 
+    @staticmethod
+    def _parse_cookie_pairs(raw: str) -> list:
+        pairs = []
+        for part in (raw or "").split(";"):
+            part = part.strip()
+            if not part or "=" not in part:
+                continue
+            name, value = part.split("=", 1)
+            name, value = name.strip(), value.strip()
+            if name:
+                pairs.append((name, value))
+        return pairs
+
+    def _is_cf_challenge(self, response) -> bool:
+        ct = (getattr(response, "headers", {}) or {}).get("Content-Type") or ""
+        if "application/json" in ct.lower():
+            return False
+        text = (getattr(response, "text", None) or "")[:800]
+        return "Just a moment" in text or "cf-challenge" in text or "challenge-platform" in text
+
+    def _request_attendance(self, url: str, cookie: str, proxies=None, timeout: int = 30):
+        """
+        签到请求：
+        1) curl_cffi Session 先 GET 首页再 POST
+        2) 过滤会触发 Cloudflare JS 挑战的 session Cookie
+        3) 仍遇到挑战页时改走浏览器上下文
+        """
+        resp = self._smart_post(url, cookie, proxies=proxies, timeout=timeout)
+        if self._is_cf_challenge(resp):
+            logger.warning("NodeSeek 签到：curl_cffi 遇到 Cloudflare JS 挑战，改用浏览器上下文")
+            return self._browser_sign(url, cookie)
+        return resp
+
     def _pick_impersonate(self) -> str:
         """选一个当前 curl_cffi 支持的指纹，老目标优先。"""
         if not HAS_CURL_CFFI or not curl_requests:
@@ -649,19 +755,42 @@ class NodeSeek(_PluginBase):
                 continue
         raise RuntimeError(f"curl_cffi 无可用浏览器指纹：{last_err}")
 
-    def _smart_post(self, url: str, headers: dict, data=None, proxies=None, timeout: int = 30):
+    def _smart_post(self, url: str, cookie: str, proxies=None, timeout: int = 30):
         """
-        智能 POST：
-        1) curl_cffi（chrome110 起回退，过 Cloudflare）
-        2) requests 仅在 curl_cffi 不可用时兜底（几乎一定被拦）
+        curl_cffi Session：先 GET 首页预热，再 POST 签到。
+        业务 Cookie 走 cookie jar，不手写 Cookie 头。
         """
         if HAS_CURL_CFFI and curl_requests:
             target = self._pick_impersonate()
             logger.info(f"NodeSeek 签到：使用 curl_cffi 发送请求（浏览器指纹：{target}）")
-            resp = curl_requests.post(
-                url, headers=headers, data=data,
-                impersonate=target, proxies=proxies, timeout=timeout,
+            sess = curl_requests.Session(impersonate=target, timeout=timeout)
+            if proxies:
+                sess.proxies = proxies
+            sess.get(
+                "https://www.nodeseek.com/",
+                headers={
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+                    "User-Agent": self.DEFAULT_UA,
+                },
             )
+            headers = dict(self.SIGN_HEADERS)
+            skipped = []
+            kept = []
+            for name, value in self._parse_cookie_pairs(cookie):
+                if name.lower() == "session":
+                    skipped.append(name)
+                    continue
+                kept.append(name)
+                try:
+                    sess.cookies.set(name, value, domain=".nodeseek.com", path="/")
+                except Exception:
+                    sess.cookies.set(name, value)
+            if skipped:
+                logger.info("NodeSeek 签到：已忽略会触发 Cloudflare 挑战的 Cookie 字段：%s", ",".join(skipped))
+            if kept:
+                logger.info("NodeSeek 签到：实际发送 Cookie 字段：%s", ",".join(kept))
+            resp = sess.post(url, headers=headers, data=b"")
             ct = (resp.headers.get("Content-Type") or "").lower()
             if resp.status_code in (400, 403) and "application/json" not in ct:
                 logger.warning(f"curl_cffi {target} 响应异常：HTTP {resp.status_code} {ct}")
@@ -669,9 +798,11 @@ class NodeSeek(_PluginBase):
 
         import requests
         logger.warning("NodeSeek 签到：未安装 curl_cffi，使用 requests 兜底（可能被 Cloudflare 拦截）")
-        resp = requests.post(
-            url, headers=headers, data=data, proxies=proxies, timeout=timeout
-        )
+        headers = dict(self.SIGN_HEADERS)
+        kept_pairs = [(n, v) for n, v in self._parse_cookie_pairs(cookie) if n.lower() != "session"]
+        if kept_pairs:
+            headers["Cookie"] = "; ".join(f"{n}={v}" for n, v in kept_pairs)
+        resp = requests.post(url, headers=headers, data=b"", proxies=proxies, timeout=timeout)
         ct = (resp.headers.get("Content-Type") or "").lower()
         if resp.status_code in (400, 403) and "application/json" not in ct:
             raise Exception(f"requests 被拦截：HTTP {resp.status_code}（建议安装 curl_cffi）")
