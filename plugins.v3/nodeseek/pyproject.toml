@@ -1,0 +1,7 @@
+[project]
+name = "moviepilot-plugin-nodeseek"
+dynamic = ["version"]
+requires-python = ">=3.12"
+dependencies = [
+    "curl_cffi>=0.7.0",
+]

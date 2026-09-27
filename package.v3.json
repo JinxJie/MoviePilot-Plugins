@@ -1,1 +1,15 @@
-{}
+{
+  "NodeSeek": {
+    "name": "NodeSeek 自动签到（V3）",
+    "description": "NodeSeek 论坛每日自动签到，使用 V3 浏览器接口与 curl_cffi 模拟 Chrome 指纹绕过 Cloudflare，支持鸡腿收益统计、签到记录与消息通知。",
+    "labels": "签到,自动化,论坛",
+    "version": "3.0.0",
+    "icon": "https://raw.githubusercontent.com/JinxJie/MoviePilot-Plugins/main/icons/nodeseek.png",
+    "author": "JinxJie",
+    "level": 2,
+    "system_version": ">=3.0.0",
+    "history": {
+      "v3.0.0": "新增 MoviePilot V3 原生实现：使用 app.sdk 稳定接口、V3 托管浏览器上下文和 pyproject.toml 依赖声明。"
+    }
+  }
+}
