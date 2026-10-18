@@ -118,7 +118,7 @@ class NodeSeek(_PluginBase):
         if config:
             self._enabled = config.get("enabled", False)
             self._onlyonce = config.get("onlyonce", False)
-            self._cookie = (config.get("cookie") or "").strip()
+            self._cookie = self._normalise_cookie(config.get("cookie"))
             self._cron = config.get("cron") or "30 0 * * *"
             self._notify = config.get("notify", True)
             self._use_proxy = True if config.get("use_proxy") is None else bool(config.get("use_proxy"))
@@ -538,15 +538,17 @@ class NodeSeek(_PluginBase):
                     break
         return accounts
 
-    def _solve_turnstile(self) -> str:
-        """使用配置的 YesCaptcha/2Captcha 获取 Turnstile token。"""
-        if not self._client_key or YesCaptchaSolver is None:
-            raise RuntimeError("未配置验证码服务 API 密钥或 solver 依赖不可用")
+    def _solve_turnstile(self, sitekey: str = "") -> str:
+        """使用配置的验证码服务获取当前登录页 Turnstile token。"""
+        if not self._client_key:
+            raise RuntimeError("未配置验证码服务 API 密钥；备用登录不可用")
+        if YesCaptchaSolver is None:
+            raise RuntimeError("solver 依赖不可用；请重新安装插件依赖")
         base = self._api_base_url
         if not base:
             base = "https://api.2captcha.com" if self._solver_type in ("2captcha", "twocaptcha") else "https://api.yescaptcha.com"
         solver = YesCaptchaSolver(api_base_url=base, client_key=self._client_key, proxies=self._get_proxies(), soft_id=None if self._solver_type in ("2captcha", "twocaptcha") else "62709")
-        token = solver.solve(url="https://www.nodeseek.com/signIn.html", sitekey="0x4AAAAAAAaNy7leGjewpVyR", user_agent=self.DEFAULT_UA)
+        token = solver.solve(url="https://www.nodeseek.com/signIn.html", sitekey=sitekey or "0x4AAAAAAAaNy7leGjewpVyR", user_agent=self.DEFAULT_UA)
         if not token:
             raise RuntimeError("验证码服务未返回 token")
         return token
@@ -633,7 +635,6 @@ class NodeSeek(_PluginBase):
 
     def _browser_login(self, user: str, password: str) -> str:
         """在 V3 托管浏览器上下文中登录，返回新业务 Cookie。"""
-        token = self._solve_turnstile()
         context = page = None
         try:
             logger.info("NodeSeek：Cookie 失效，使用 MoviePilot V3 托管浏览器上下文登录")
@@ -644,6 +645,13 @@ class NodeSeek(_PluginBase):
                 page.wait_for_load_state("networkidle", timeout=60000)
             except Exception:
                 pass
+            sitekey = page.evaluate("""
+                () => {
+                  const el = document.querySelector('[data-sitekey], .cf-turnstile');
+                  return el ? (el.getAttribute('data-sitekey') || '') : '';
+                }
+            """) or ""
+            token = self._solve_turnstile(str(sitekey))
             result = page.evaluate("""
             async ({token, username, password}) => {
               const out = {};
@@ -681,33 +689,55 @@ class NodeSeek(_PluginBase):
                     context.close()
 
     def _refresh_cookie_if_needed(self) -> bool:
-        """Cookie 失效后用第一个账号刷新并写回配置。"""
+        """Cookie 失效后逐个尝试账号刷新并写回配置。"""
         accounts = self._parse_accounts()
         if not accounts:
             logger.warning("NodeSeek：Cookie 已失效，但未配置账号密码")
             return False
-        user, password = accounts[0]
-        try:
-            new_cookie = self._browser_login(user, password)
-            self._cookie = new_cookie
-            if self._auto_save_cookie:
-                self.__update_config()
-                logger.info("NodeSeek：新 Cookie 已写回插件配置")
-            return True
-        except Exception as e:
-            logger.error("NodeSeek：自动登录刷新 Cookie 失败：%s", e)
-            return False
+        for user, password in accounts:
+            try:
+                new_cookie = self._browser_login(user, password)
+                self._cookie = self._normalise_cookie(new_cookie)
+                if not self._parse_cookie_pairs(self._cookie):
+                    raise RuntimeError("登录成功但 Cookie 格式为空")
+                if self._auto_save_cookie:
+                    self.__update_config()
+                    logger.info("NodeSeek：新 Cookie 已写回插件配置")
+                return True
+            except Exception as e:
+                logger.error("NodeSeek：账号 %s 自动登录刷新 Cookie 失败：%s", user, e)
+        logger.error("NodeSeek：所有备用账号均登录失败（%d 个）", len(accounts))
+        return False
+
+    @staticmethod
+    def _normalise_cookie(raw: Any) -> str:
+        """规范化配置 Cookie，兼容整段 Cookie、Cookie: 前缀和单值粘贴。"""
+        value = str(raw or "").strip().strip('"').strip("'")
+        if value.lower().startswith("cookie:"):
+            value = value.split(":", 1)[1].strip()
+        pairs = NodeSeek._parse_cookie_pairs(value)
+        if not pairs:
+            return value
+        return "; ".join(f"{name}={item}" for name, item in pairs)
 
     @staticmethod
     def _parse_cookie_pairs(raw: str) -> list:
+        """解析 Cookie；同时兼容只粘贴 nodeseek.com 的 Cookie 值。"""
+        raw = (raw or "").strip()
+        if raw.lower().startswith("cookie:"):
+            raw = raw.split(":", 1)[1].strip()
+        # 只有形如 name=value 的首段才按整段 Cookie 解析；Cookie 值本身也可能含 '='。
+        first = raw.split(";", 1)[0].strip()
+        if not re.match(r"^[A-Za-z_][A-Za-z0-9_.-]*\s*=", first):
+            return [("nodeseek.com", raw)]
         pairs = []
-        for part in (raw or "").split(";"):
+        for part in raw.split(";"):
             part = part.strip()
             if not part or "=" not in part:
                 continue
             name, value = part.split("=", 1)
             name, value = name.strip(), value.strip()
-            if name:
+            if name and value:
                 pairs.append((name, value))
         return pairs
 
