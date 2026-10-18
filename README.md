@@ -201,19 +201,24 @@ NodeSeek 论坛每日自动签到，使用 curl_cffi 模拟 Chrome 浏览器指�
 
 ```text
 MoviePilot-Plugins/
-├── docs/                       # 官方文档
-├── icons/                      # 插件图标
-├── plugins/                    # V1 插件
-├── plugins.v2/                 # V2 插件
+├── .github/                    # GitHub 工作流与仓库配置
+├── .githooks/                  # Git 钩子
+├── docs/                       # MoviePilot 插件开发与 V2/V3 适配文档
+├── icons/                      # 插件图标资源
+├── plugins.v2/                 # MoviePilot V2 插件
+│   ├── dian115sign/            # 癫影自动签到
 │   ├── hhlottery/              # HHCLUB 自动抽奖
-│   ├── nodeseek/               # NodeSeek 自动签到
-│   ├── pluginresidueclean/     # 插件残留清理
-│   └── dian115sign/            # 癫影自动签到
-├── scripts/                    # 官方脚本
-├── tests/                      # 官方测试
-├── package.json                # V1 插件索引
-├── package.v2.json             # V2 插件索引
-├── package.v3.json             # V3 插件索引
+│   ├── nodeseek/               # NodeSeek 自动签到（V2）
+│   └── pluginresidueclean/     # 插件残留清理
+├── plugins.v3/                 # MoviePilot V3 原生插件
+│   └── nodeseek/               # NodeSeek 自动签到（V3）
+├── scripts/                    # 上游辅助脚本
+├── tests/                      # 上游测试与插件测试支撑
+├── LICENSE                     # 开源许可证
+├── package.json                # V1 市场索引（仅保留兼容元数据）
+├── package.v2.json             # V2 插件市场索引
+├── package.v3.json             # V3 插件市场索引
+├── pytest.ini                  # Pytest 配置
 └── README.md                   # 仓库说明
 ```
 
