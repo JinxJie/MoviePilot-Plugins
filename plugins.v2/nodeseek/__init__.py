@@ -109,6 +109,7 @@ class NodeSeek(_PluginBase):
         self._api_base_url = ""
         self._auto_save_cookie = True
         self._running = False
+        self._last_login_error = ""
 
     def init_plugin(self, config: dict = None):
         """
@@ -440,11 +441,15 @@ class NodeSeek(_PluginBase):
 
         # Cookie 优先：只有明确判定失效时，才用干净浏览器账密刷新并重试一次。
         result.update(self._parse_response(response))
-        if result["cookie_invalid"] and self._cookie_first and self._refresh_cookie_if_needed():
-            logger.info("NodeSeek：新 Cookie 已取得，重试签到一次")
-            response = self._request_attendance(sign_url, self._cookie, proxies)
-            result = {"success": False, "already": False, "cookie_invalid": False, "message": "", "gain": 0, "current": 0}
-            result.update(self._parse_response(response))
+        if result["cookie_invalid"] and self._cookie_first:
+            if self._refresh_cookie_if_needed():
+                logger.info("NodeSeek：新 Cookie 已取得，重试签到一次")
+                response = self._request_attendance(sign_url, self._cookie, proxies)
+                result = {"success": False, "already": False, "cookie_invalid": False, "message": "", "gain": 0, "current": 0}
+                result.update(self._parse_response(response))
+            elif self._last_login_error:
+                result["cookie_invalid"] = False
+                result["message"] = f"Cookie 无效；备用登录失败：{self._last_login_error}"
         logger.info(
             f"NodeSeek 签到结果：success={result['success']} already={result['already']} "
             f"cookie_invalid={result['cookie_invalid']} message={result['message']}"
@@ -574,7 +579,7 @@ class NodeSeek(_PluginBase):
         context = page = None
         try:
             logger.info("NodeSeek：使用 CloakBrowser 执行签到（过 JS 挑战）")
-            context = launch_context(headless=True)
+            context = launch_context(headless=True, **self._browser_launch_kwargs())
             page = context.new_page()
             page.goto("https://www.nodeseek.com/", timeout=60000)
             try:
@@ -648,9 +653,9 @@ class NodeSeek(_PluginBase):
         context = page = None
         try:
             logger.info("NodeSeek：Cookie 失效，使用干净 CloakBrowser 上下文登录")
-            context = launch_context(headless=True)
+            context = launch_context(headless=True, **self._browser_launch_kwargs())
             page = context.new_page()
-            page.goto("https://www.nodeseek.com/signIn.html", timeout=60000)
+            page.goto("https://www.nodeseek.com/signIn.html", wait_until="domcontentloaded", timeout=60000)
             try:
                 page.wait_for_load_state("networkidle", timeout=60000)
             except Exception:
@@ -693,8 +698,10 @@ class NodeSeek(_PluginBase):
 
     def _refresh_cookie_if_needed(self) -> bool:
         """Cookie 失效后逐个尝试账号刷新并写回配置。"""
+        self._last_login_error = ""
         accounts = self._parse_accounts()
         if not accounts:
+            self._last_login_error = "未配置账号密码"
             logger.warning("NodeSeek：Cookie 已失效，但未配置账号密码")
             return False
         for user, password in accounts:
@@ -708,9 +715,17 @@ class NodeSeek(_PluginBase):
                     logger.info("NodeSeek：新 Cookie 已写回插件配置")
                 return True
             except Exception as e:
+                self._last_login_error = str(e)
                 logger.error("NodeSeek：账号 %s 自动登录刷新 Cookie 失败：%s", user, e)
         logger.error("NodeSeek：所有备用账号均登录失败（%d 个）", len(accounts))
         return False
+
+    def _browser_launch_kwargs(self) -> dict:
+        """将 MoviePilot 系统代理传给浏览器上下文。"""
+        proxy = self._system_proxy()
+        if not proxy:
+            return {}
+        return {"proxy": {"server": proxy}}
 
     @staticmethod
     def _normalise_cookie(raw: Any) -> str:
