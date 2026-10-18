@@ -9,7 +9,7 @@ JinxJie 的 [MoviePilot](https://github.com/jxxghp/MoviePilot) 第三方插件�
 | 插件 | 目录 | 版本 | 说明 |
 |------|------|------|------|
 | HHCLUB 自动抽奖 | [`plugins.v2/hhlottery`](plugins.v2/hhlottery) | 1.0.8 | 定时自动抽奖、大奖即时通知、盈亏统计、站内信清理 |
-| NodeSeek 自动签到 | [`plugins.v2/nodeseek`](plugins.v2/nodeseek) | 1.0.1 | NodeSeek 论坛每日自动签到、鸡腿收益统计、消息通知 |
+| NodeSeek 自动签到 | [`plugins.v2/nodeseek`](plugins.v2/nodeseek) | 1.0.2 | NodeSeek 论坛每日自动签到、鸡腿收益统计、消息通知 |
 | 插件残留清理 | [`plugins.v2/pluginresidueclean`](plugins.v2/pluginresidueclean) | 1.0.1 | 风险分级、单项清理、清理后复扫、定时扫描通知，默认不自动删除 |
 | 癫影自动签到 | [`plugins.v2/dian115sign`](plugins.v2/dian115sign) | 1.0.2 | 癫影每日自动签到、普通签/运气签开关、积分与连续签到统计、结果通知 |
 
@@ -83,7 +83,7 @@ https://github.com/JinxJie/MoviePilot-Plugins
 <details>
 <summary>2. 📌 NodeSeek 自动签到</summary>
 
-**v1.0.1 · 签到自动化 · NodeSeek 论坛**
+**v1.0.2 · 签到自动化 · NodeSeek 论坛**
 
 **功能：**
 NodeSeek 论坛每日自动签到，使用 curl_cffi 模拟 Chrome 浏览器指纹绕过 Cloudflare 拦截，支持鸡腿收益统计、签到历史记录和消息通知。
@@ -109,6 +109,7 @@ NodeSeek 论坛每日自动签到，使用 curl_cffi 模拟 Chrome 浏览器指�
 本插件仅通过站点现有接口执行签到操作，不会修改任何站点数据。站点规则、接口或防护策略变更可能导致功能异常，请自行评估后使用；因使用本插件产生的任何问题，开发者不承担责任。
 
 **更新说明：**
+- v1.0.2：兼容只粘贴 `nodeseek.com` Cookie 值；浏览器回退携带完整会话并继承系统代理；优化备用登录诊断与多账号尝试。
 - v1.0.1：修复今日已签到状态识别，调整页面布局与设置说明。
 - v1.0.0：首发版本，支持每日定时自动签到、curl_cffi 过 Cloudflare、鸡腿收益统计、签到历史、消息通知、手动签到命令与 API。
 

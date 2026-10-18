@@ -20,7 +20,7 @@ NodeSeek 论坛每日自动签到插件，适用于 [MoviePilot](https://github.
 3. 复制名为 **`nodeseek.com`** 的 Cookie 值（或整段 Cookie 字符串）
 4. 粘贴到插件配置的「Cookie」输入框
 
-> ⚠️ 不要只贴 `session=`。Cloudflare 看到这个字段会下发 JS 挑战页，curl_cffi 过不了。插件会自动忽略 `session`，只发送 `nodeseek.com` 等业务 Cookie。
+> ⚠️ 不要只贴 `session=`。首次 curl_cffi 请求会忽略该字段以避免 Cloudflare JS 挑战；若接口无法识别用户，插件会自动改用浏览器携带完整 Cookie（含 `session`）重试。
 
 > ⚠️ Cookie 会过期。失效时插件会发送「Cookie 已失效」通知，重新复制更新即可。
 
@@ -75,5 +75,6 @@ NodeSeek 签到
 
 ## 📦 版本
 
+- v1.0.2 兼容仅粘贴 `nodeseek.com` Cookie 值，浏览器回退携带完整会话并继承系统代理，优化备用登录诊断与多账号尝试
 - v1.0.1 修复今日已签到状态识别，调整页面布局与设置说明
 - v1.0.0 首发
