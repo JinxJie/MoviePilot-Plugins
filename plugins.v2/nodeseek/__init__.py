@@ -439,8 +439,20 @@ class NodeSeek(_PluginBase):
             self._notify_result(result, date, clock)
             return result
 
-        # Cookie 优先：只有明确判定失效时，才用干净浏览器账密刷新并重试一次。
+        # curl_cffi 会丢弃 session 以避免 CF JS 挑战；若 API 因此找不到用户，
+        # 先由真实浏览器携带完整 Cookie（含 session）重试，浏览器可处理 JS 挑战。
         result.update(self._parse_response(response))
+        if result["cookie_invalid"]:
+            try:
+                logger.info("NodeSeek：接口未识别无 session 请求，改用浏览器携带完整 Cookie 重试")
+                browser_response = self._browser_sign(sign_url, self._cookie)
+                browser_result = self._parse_response(browser_response)
+                if browser_result["success"] or browser_result["already"] or not browser_result["cookie_invalid"]:
+                    result = browser_result
+            except Exception as e:
+                logger.warning("NodeSeek：浏览器 Cookie 重试失败：%s", e)
+
+        # 浏览器仍确认登录态无效时，才使用备用账号密码刷新 Cookie 并重试一次。
         if result["cookie_invalid"] and self._cookie_first:
             if self._refresh_cookie_if_needed():
                 logger.info("NodeSeek：新 Cookie 已取得，重试签到一次")
@@ -589,9 +601,8 @@ class NodeSeek(_PluginBase):
             cookies = []
             skipped = []
             for name, value in self._parse_cookie_pairs(cookie):
-                if name.lower() == "session":
-                    skipped.append(name)
-                    continue
+                # 浏览器能够执行 Cloudflare JavaScript；这里必须保留 session，
+                # 因为它可能是 NodeSeek 识别当前登录用户所需的会话字段。
                 cookies.append({
                     "name": name,
                     "value": value,
