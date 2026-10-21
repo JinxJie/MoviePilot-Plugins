@@ -634,12 +634,23 @@ class NodeSeek(_PluginBase):
                 url,
             ) or {}
             names = []
+            browser_pairs = []
             for item in (context.cookies() or []):
-                name, domain = item.get("name"), item.get("domain", "")
-                if name and "nodeseek.com" in domain:
+                name, value, domain = item.get("name"), item.get("value"), item.get("domain", "")
+                if name and value and "nodeseek.com" in domain:
                     names.append(name)
+                    browser_pairs.append((name, value))
             if names:
                 logger.info("NodeSeek：浏览器签到后 Cookie 字段：%s", ",".join(names))
+            # 浏览器可能刷新 session / pjwt / smac；持久化业务会话，
+            # 但绝不让只有 cf_clearance 的结果覆盖原登录 Cookie。
+            auth_names = {"session", "pjwt", "smac", "nodeseek.com"}
+            if self._auto_save_cookie and any(name.lower() in auth_names for name, _ in browser_pairs):
+                refreshed = self._normalise_cookie("; ".join(f"{name}={value}" for name, value in browser_pairs))
+                if refreshed and refreshed != self._cookie:
+                    self._cookie = refreshed
+                    self.__update_config()
+                    logger.info("NodeSeek：浏览器会话 Cookie 已自动写回插件配置")
             return _Resp(int(result.get("status") or 0), result.get("ct") or "", result.get("text") or "")
         finally:
             try:
