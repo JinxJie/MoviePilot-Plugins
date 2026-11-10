@@ -24,7 +24,7 @@ except ImportError:
 class Dian115Wheel(_PluginBase):
     plugin_name = "癫影幸运转盘"
     plugin_desc = "癫影每日幸运转盘：可选定时抽奖、次数与余额限制、中奖记录及通知。每次抽奖会消耗站点积分。"
-    plugin_icon = "https://raw.githubusercontent.com/JinxJie/MoviePilot-Plugins/main/icons/dian115sign.png"
+    plugin_icon = "https://raw.githubusercontent.com/JinxJie/MoviePilot-Plugins/main/icons/dian115wheel.png"
     plugin_version = "3.0.0"
     plugin_author = "JinxJie"
     author_url = "https://github.com/JinxJie"
@@ -42,6 +42,7 @@ class Dian115Wheel(_PluginBase):
         self._enabled = False
         self._token = ""
         self._cron = "0 10 * * *"
+        self._spin_mode = "custom"
         self._max_spins = 1
         self._min_balance = 5
         self._notify = True
@@ -62,6 +63,7 @@ class Dian115Wheel(_PluginBase):
         self._enabled = bool(config.get("enabled", False))
         self._token = self._extract_token(config.get("token") or "")
         self._cron = config.get("cron") or "0 10 * * *"
+        self._spin_mode = "maximum" if config.get("spin_mode") == "maximum" else "custom"
         self._max_spins = max(1, min(100, int(config.get("max_spins") if config.get("max_spins") is not None else 1)))
         self._min_balance = max(0, int(config.get("min_balance") if config.get("min_balance") is not None else 5))
         self._notify = bool(config.get("notify", True))
@@ -69,6 +71,7 @@ class Dian115Wheel(_PluginBase):
         self._proxy = str(config.get("proxy") or "").strip()
         if config.get("onlyonce"):
             self.update_config({"enabled": self._enabled, "token": self._token, "cron": self._cron,
+                                "spin_mode": self._spin_mode,
                                 "max_spins": self._max_spins, "min_balance": self._min_balance,
                                 "notify": self._notify, "use_system_proxy": self._use_system_proxy,
                                 "proxy": self._proxy, "onlyonce": False})
@@ -209,11 +212,18 @@ class Dian115Wheel(_PluginBase):
             return {"code": 1, "msg": "请先填写登录 Token"}
         results = []
         error = ""
+        initial_remaining = None
         try:
-            for _ in range(self._max_spins):
+            # 最大次数模式逐次读取站点限额；首次额度也作为本轮上限，防止站点计数暂未更新时超抽。
+            for _ in range(self._max_spins if self._spin_mode == "custom" else 100):
                 status = self._request("GET", self.STATUS)
                 wheel = (status.get("items") or {}).get("daily_wheel") or {}
                 used, maximum = int(wheel.get("used_today") or 0), int(wheel.get("max_plays") or 0)
+                if self._spin_mode == "maximum":
+                    if initial_remaining is None:
+                        initial_remaining = max(0, maximum - used)
+                    if len(results) >= initial_remaining:
+                        break
                 raw_cost = wheel.get("cost")
                 if isinstance(raw_cost, bool) or raw_cost is None or int(raw_cost) < 0:
                     raise RuntimeError("站点未提供有效的单次抽奖消耗，已停止以保护积分")
@@ -273,15 +283,19 @@ class Dian115Wheel(_PluginBase):
             field("VSwitch", "enabled", "启用定时抽奖"),
             field("VTextField", "token", "癫影 __Host-portal_token", type="password", hint="登录 m.dian115.com 后从浏览器 Cookie 复制；不与签到插件共享登录状态", persistent_hint=True),
             field("VTextField", "cron", "Cron（默认每天 10:00）"),
-            field("VTextField", "max_spins", "每轮最多抽奖次数", type="number", min="1", max="100"),
+            field("VSelect", "spin_mode", "抽奖次数模式", items=[
+                {"title": "自定义次数", "value": "custom"},
+                {"title": "最大次数（抽完今日剩余额度）", "value": "maximum"}],
+                  hint="最大次数按站点今日剩余额度执行；两种模式均逐次检查积分保留限制", persistent_hint=True),
+            field("VTextField", "max_spins", "自定义次数（仅自定义模式生效）", type="number", min="1", max="100"),
             field("VTextField", "min_balance", "抽奖后至少保留积分", type="number", min="0"),
             field("VSwitch", "notify", "中奖结果通知"),
             field("VSwitch", "use_system_proxy", "使用系统代理（默认开启）"),
             field("VTextField", "proxy", "自定义代理（关闭系统代理时生效）"),
             field("VSwitch", "onlyonce", "保存后立即运行一次（消耗积分）"),
-            {"component": "VAlert", "props": {"type": "warning", "variant": "tonal", "text": "幸运转盘会消耗积分；不自动重试抽奖 POST。请先设定保留积分和最大次数。"}},
+            {"component": "VAlert", "props": {"type": "warning", "variant": "tonal", "text": "幸运转盘会消耗积分；最大次数按站点今日剩余额度执行，逐次检查积分与限额；不自动重试抽奖 POST。"}},
         ]}]
-        return form, {"enabled": False, "token": "", "cron": "0 10 * * *", "max_spins": 1,
+        return form, {"enabled": False, "token": "", "cron": "0 10 * * *", "spin_mode": "custom", "max_spins": 1,
                       "min_balance": 5, "notify": True, "use_system_proxy": True, "proxy": "", "onlyonce": False}
 
     def get_page(self):

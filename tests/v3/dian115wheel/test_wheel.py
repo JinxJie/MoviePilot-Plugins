@@ -65,6 +65,11 @@ class WheelTests(unittest.TestCase):
         self.assertFalse(defaults["enabled"])
         self.assertFalse(defaults["onlyonce"])
         self.assertEqual(defaults["max_spins"], 1)
+        self.assertEqual(defaults["spin_mode"], "custom")
+        fields = form[0]["content"]
+        selector = next(f for f in fields if f.get("props", {}).get("model") == "spin_mode")
+        self.assertEqual(selector["component"], "VSelect")
+        self.assertEqual({i["value"] for i in selector["props"]["items"]}, {"custom", "maximum"})
         self.assertEqual(form[0]["component"], "VForm")
         self.assertEqual(p.get_api()[0]["methods"], ["POST"])
 
@@ -91,6 +96,7 @@ class WheelTests(unittest.TestCase):
         self.assertEqual(p.saved_config["onlyonce"], False)
         self.assertEqual(p._token, "test-value")
         self.assertEqual(p._max_spins, 2)
+        self.assertEqual(p.saved_config["spin_mode"], "custom")
         self.assertEqual(p._min_balance, 20)
         self.assertEqual(p.get_service(), [])
         worker.assert_called_once()
@@ -175,6 +181,77 @@ class WheelTests(unittest.TestCase):
         self.assertEqual(calls.count(("POST", p.WHEEL)), 1)
         self.assertEqual(p.data["wheel_records"][0]["points"], 3)
         self.assertTrue(p.get_page())
+
+    def test_maximum_mode_uses_remaining_site_quota_and_ignores_custom_count(self):
+        p = self.plugin
+        p._spin_mode = "maximum"
+        p._max_spins = 1
+        used = 17
+        calls = []
+        def fake(method, path, **kw):
+            nonlocal used
+            calls.append((method, path))
+            if path == p.STATUS:
+                return {"items": {"daily_wheel": {"used_today": used, "max_plays": 20, "cost": 5}}}
+            if path == p.ME:
+                return {"user": {"points": 100}}
+            used += 1
+            return {"cost": 5, "prize": {"label": "+3", "points": 3}}
+        p._request = fake
+        result = p._run()
+        self.assertEqual(result["code"], 0)
+        self.assertEqual(len(result["data"]), 3)
+        self.assertEqual(calls.count(("POST", p.WHEEL)), 3)
+        self.assertEqual(calls.count(("GET", p.STATUS)), 4)
+
+    def test_maximum_mode_stops_at_initial_remaining_when_site_count_is_stale(self):
+        p = self.plugin
+        p._spin_mode = "maximum"
+        p._max_spins = 1
+        calls = []
+        def fake(method, path, **kw):
+            calls.append((method, path))
+            if path == p.STATUS:
+                return {"items": {"daily_wheel": {"used_today": 18, "max_plays": 20, "cost": 5}}}
+            if path == p.ME:
+                return {"user": {"points": 100}}
+            return {"cost": 5, "prize": {"label": "+3", "points": 3}}
+        p._request = fake
+        self.assertEqual(len(p._run()["data"]), 2)
+        self.assertEqual(calls.count(("POST", p.WHEEL)), 2)
+
+    def test_maximum_mode_respects_balance_limit(self):
+        p = self.plugin
+        p.init_plugin({"token": "test-token", "spin_mode": "maximum", "max_spins": 1,
+                       "min_balance": 10})
+        calls = []
+        def fake(method, path, **kw):
+            calls.append((method, path))
+            if path == p.STATUS:
+                return {"items": {"daily_wheel": {"used_today": 0, "max_plays": 20, "cost": 5}}}
+            if path == p.ME:
+                return {"user": {"points": 12}}
+            self.fail("balance guard should prevent POST")
+        p._request = fake
+        result = p._run()
+        self.assertEqual(result["code"], 1)
+        self.assertEqual(calls, [("GET", p.STATUS), ("GET", p.ME)])
+
+    def test_custom_mode_ignores_remaining_quota_above_configured_count(self):
+        p = self.plugin
+        p._spin_mode = "custom"
+        p._max_spins = 2
+        calls = []
+        def fake(method, path, **kw):
+            calls.append((method, path))
+            if path == p.STATUS:
+                return {"items": {"daily_wheel": {"used_today": 0, "max_plays": 20, "cost": 5}}}
+            if path == p.ME:
+                return {"user": {"points": 100}}
+            return {"cost": 5, "prize": {"label": "+3", "points": 3}}
+        p._request = fake
+        self.assertEqual(len(p._run()["data"]), 2)
+        self.assertEqual(calls.count(("POST", p.WHEEL)), 2)
 
     def test_missing_cost_prevents_spending(self):
         p = self.plugin

@@ -18,7 +18,7 @@
     "description": "癫影每日幸运转盘，支持定时运行、抽奖次数及最低保留积分限制、结果记录与通知。每次抽奖消耗站点积分。",
     "labels": "癫影,幸运转盘,抽奖,自动化",
     "version": "3.0.0",
-    "icon": "https://raw.githubusercontent.com/JinxJie/MoviePilot-Plugins/main/icons/dian115sign.png",
+    "icon": "https://raw.githubusercontent.com/JinxJie/MoviePilot-Plugins/main/icons/dian115wheel.png",
     "author": "JinxJie",
     "level": 2,
     "release": false,
