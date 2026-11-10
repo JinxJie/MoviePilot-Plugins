@@ -14,6 +14,7 @@ import json
 import os
 import time
 import uuid
+import threading
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -34,6 +35,7 @@ except Exception:
 try:
     from cryptography.hazmat.primitives.asymmetric import ec
     from cryptography.hazmat.primitives import hashes as _crypto_hashes
+    from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
     HAS_CRYPTO = True
 except Exception:
     ec = None  # type: ignore
@@ -48,9 +50,9 @@ class Dian115Sign(_PluginBase):
 
     # 插件元信息
     plugin_name = "癫影自动签到"
-    plugin_desc = "癫影每日自动签到 · 普通签/运气签模式开关 · 连续签到与积分统计 · 签到记录 · 结果通知 · 失败重试"
+    plugin_desc = "癫影每日自动签到 · 普通签/运气签 · 可选签到后最大抽奖 · 积分统计和结果通知"
     plugin_icon = "https://raw.githubusercontent.com/JinxJie/MoviePilot-Plugins/main/icons/dian115sign.png"
-    plugin_version = "1.0.2"
+    plugin_version = "1.0.3"
     plugin_author = "JinxJie"
     author_url = "https://github.com/JinxJie"
     plugin_config_prefix = "dian115sign_"
@@ -101,6 +103,14 @@ class Dian115Sign(_PluginBase):
         self._clock_skew_ms = 0
         self._visitor_id = str(uuid.uuid4())
         self._last_error = ""
+        self._wheel_lock = threading.Lock()
+        self._wheel_session_id = ""
+        self._wheel_signature_version = 1
+        self._maximum_wheel = False
+        self._wheel_session_expiry = 0
+        self._wheel_key = None
+        self._wheel_proof = ""
+        self._wheel_skew = 0
 
     # ======================== 配置项声明 ========================
 
@@ -111,6 +121,7 @@ class Dian115Sign(_PluginBase):
             self._email = (config.get("email") or "").strip()
             self._password = config.get("password") or ""
             self._lucky_mode = bool(config.get("lucky_mode"))
+            self._maximum_wheel = bool(config.get("maximum_wheel", False))
             note = self._token_expiry_note()
             if note:
                 logger.info(f"癫影 {note}")
@@ -140,6 +151,7 @@ class Dian115Sign(_PluginBase):
             "email": getattr(self, "_email", ""),
             "password": getattr(self, "_password", ""),
             "lucky_mode": self._lucky_mode,
+            "maximum_wheel": getattr(self, "_maximum_wheel", False),
             "cron": self._cron,
             "notify": self._notify,
             "retry": self._retry,
@@ -758,6 +770,177 @@ class Dian115Sign(_PluginBase):
             self._save_records(self._records)
         return result
 
+    def _wheel_headers(self, method: str, path: str) -> dict:
+        """转盘单独使用站点签名 v2，避免改变现有签到协议。"""
+        headers = self._base_headers("/lottery")
+        headers.update({"Content-Type": "application/json", "Origin": self.BASE_URL,
+                        "X-Portal-Current-Path": "/lottery", "X-Portal-Visitor-ID": self._visitor_id,
+                        "X-Portal-Browser-Proof": self._wheel_proof})
+        if not self._wheel_key:
+            return headers
+        ts = str(int(time.time() * 1000) + self._wheel_skew)
+        nonce = self._b64u(os.urandom(24))
+        if self._wheel_signature_version == 2:
+            message = f"portal-browser-request/v2\n{self._wheel_session_id}\n{method}\n{path}\n{ts}\n{nonce}"
+            headers.update({"X-Portal-Browser-Session": self._wheel_session_id,
+                            "X-Portal-Browser-Version": "2"})
+        else:
+            message = f"portal-browser-request/v1\n{method}\n{path.split('?', 1)[0]}\n{ts}\n{nonce}"
+        der = self._wheel_key.sign(message.encode(), ec.ECDSA(_crypto_hashes.SHA256()))
+        r, s = decode_dss_signature(der)
+        headers.update({"X-Portal-Browser-TS": ts, "X-Portal-Browser-Nonce": nonce,
+                        "X-Portal-Browser-Sig": self._b64u(r.to_bytes(32, 'big') + s.to_bytes(32, 'big'))})
+        return headers
+
+    def _wheel_bootstrap(self, force: bool = False):
+        if not force and time.time() < self._wheel_session_expiry:
+            return
+        self._wheel_key = None
+        self._wheel_session_expiry = 0
+        try:
+            challenge = self._http().get(f"{self.BASE_URL}{self.API_BASE}/auth/browser-challenge",
+                                         headers=self._base_headers("/lottery"), timeout=15)
+            if challenge.status_code != 200:
+                raise RuntimeError(f"browser-challenge HTTP {challenge.status_code}")
+            data = challenge.json()
+            if data.get("code") != "ok" or not data.get("proof"):
+                raise RuntimeError("browser-challenge 响应无效")
+            self._wheel_proof = data["proof"]
+            proof_ttl = int(data.get("ttl") or 600)
+            key = ec.generate_private_key(ec.SECP256R1())
+            numbers = key.public_key().public_numbers()
+            jwk = {"kty": "EC", "crv": "P-256", "x": self._b64u(numbers.x.to_bytes(32, 'big')),
+                   "y": self._b64u(numbers.y.to_bytes(32, 'big'))}
+            headers = self._wheel_headers("POST", self.API_BASE + "/auth/browser-session")
+            response = self._http().post(f"{self.BASE_URL}{self.API_BASE}/auth/browser-session",
+                                         json={"public_jwk": jwk, "signature_version": 2},
+                                         headers=headers, timeout=15)
+            if response.status_code != 200:
+                raise RuntimeError(f"browser-session HTTP {response.status_code}")
+            session = response.json()
+            if session.get("code") != "ok" or session.get("enabled") is False:
+                raise RuntimeError("browser-session 响应无效")
+            self._wheel_key = key
+            self._wheel_session_id = str(session.get("session_id") or "")
+            self._wheel_signature_version = (2 if self._wheel_session_id and
+                                             int(session.get("signature_version") or 1) == 2 else 1)
+            self._wheel_skew = int(session.get("server_time_ms") or int(time.time() * 1000)) - int(time.time() * 1000)
+            self._wheel_session_expiry = time.time() + max(30, min(proof_ttl - 30, int(session.get("ttl") or 1800) - 300))
+        except RuntimeError:
+            raise
+        except Exception as exc:
+            raise RuntimeError(f"浏览器验证请求失败：{type(exc).__name__}") from None
+
+    def _wheel_request(self, method: str, path: str, retry: bool = True) -> dict:
+        self._wheel_bootstrap()
+        try:
+            response = self._http().request(method, self.BASE_URL + path,
+                                            headers=self._wheel_headers(method, path), timeout=15)
+        except Exception as exc:
+            raise RuntimeError(f"{method} 请求结果不明：{type(exc).__name__}" if method == "POST"
+                               else f"GET 请求失败：{type(exc).__name__}") from None
+        try:
+            data = response.json()
+        except Exception:
+            prefix = "抽奖 POST 结果不明，请核对站点积分和次数，勿重试；" if method == "POST" else ""
+            raise RuntimeError(prefix + f"站点返回非 JSON（HTTP {response.status_code}）") from None
+        if not isinstance(data, dict):
+            raise RuntimeError("抽奖 POST 结果不明，请核对站点积分和次数，勿重试" if method == "POST" else "站点响应格式无效")
+        if method == "GET" and retry and data.get("code") in self.PROOF_RETRY_CODES:
+            self._wheel_bootstrap(force=True)
+            return self._wheel_request(method, path, retry=False)
+        if response.status_code >= 400 or data.get("code") not in (None, "ok"):
+            code = str(data.get("code") or "")
+            prefix = "抽奖 POST 结果不明，请核对站点积分和次数，勿重试；" if method == "POST" else ""
+            safe_codes = {"browser_proof_required", "browser_proof_invalid", "no_token", "invalid_token", "token_revoked", "unauthorized", "rate_limited"}
+            raise RuntimeError(prefix + f"站点接口失败：HTTP {response.status_code}" +
+                               (f"，代码 {code}" if code in safe_codes else ""))
+        return data
+
+    def _wheel_records(self) -> list:
+        rows = self.get_data("dian115_wheel_records") or []
+        return rows if isinstance(rows, list) else []
+
+    def _wheel_run(self) -> dict:
+        """每次消费前预检。仅记录明确成功的 POST；结果不明绝不重试。"""
+        if not self._wheel_lock.acquire(blocking=False):
+            return {"status": "执行中", "results": [], "error": "转盘任务正在运行"}
+        results, error, initial_remaining, uncertain = [], "", None, False
+        today = datetime.now().strftime("%Y-%m-%d")
+        try:
+            last = self.get_data("dian115_wheel_last") or {}
+            if isinstance(last, dict) and last.get("date") == today and last.get("uncertain"):
+                return {"status": "未抽奖", "results": [], "error": "先前抽奖结果不明；请核对站点积分和次数，今日不再自动抽奖"}
+            for _ in range(100):
+                status = self._wheel_request("GET", f"{self.API_BASE}/games/status")
+                wheel = (status.get("items") or {}).get("daily_wheel") or {}
+                raw_used, raw_maximum = wheel.get("used_today"), wheel.get("max_plays")
+                if not isinstance(raw_used, (int, str)) or isinstance(raw_used, bool) or not isinstance(raw_maximum, (int, str)) or isinstance(raw_maximum, bool):
+                    raise RuntimeError("站点未返回有效转盘额度，已停止")
+                used, maximum = int(raw_used), int(raw_maximum)
+                if maximum < 0 or used < 0 or maximum > 100:
+                    raise RuntimeError("站点每日额度异常，已停止")
+                if initial_remaining is None:
+                    initial_remaining = max(0, maximum - used)
+                    if initial_remaining == 0:
+                        error = "今日次数已用完"
+                        break
+                if len(results) >= initial_remaining:
+                    break
+                if used >= maximum:
+                    error = "今日次数已用完"
+                    break
+                raw_cost = wheel.get("cost")
+                if raw_cost is None or isinstance(raw_cost, bool) or int(raw_cost) < 0:
+                    raise RuntimeError("站点未返回有效抽奖成本，已停止")
+                cost = int(raw_cost)
+                me = self._wheel_request("GET", f"{self.API_BASE}/me")
+                raw_points = (me.get("user") or {}).get("points")
+                if raw_points is None or isinstance(raw_points, bool) or int(raw_points) < 0:
+                    raise RuntimeError("站点未返回有效积分，已停止")
+                if int(raw_points) - cost < 5:
+                    error = "积分不足（至少保留 5 积分）"
+                    break
+                # 消费性请求任何失败均停止，不重试。
+                # 发送付费 POST 前持久化未确认状态；即使进程在响应前退出，也不会在下次签到时盲目重抽。
+                self.save_data("dian115_wheel_last", {"date": today, "status": "结果待核对",
+                                                      "error": "抽奖结果不明，请核对站点积分和次数", "uncertain": True})
+                uncertain = True
+                result = self._wheel_request("POST", f"{self.API_BASE}/lottery/wheel", retry=False)
+                prize = result.get("prize")
+                if not isinstance(prize, dict) or not any(k in prize for k in ("label", "points", "vip_days")):
+                    raise RuntimeError("抽奖结果不明，请核对站点积分和次数，勿重试")
+                row = {"date": datetime.now().isoformat(timespec="seconds"), "cost": cost,
+                       "label": str(prize.get("label") or "未知")[:80],
+                       "points": int(prize.get("points") or 0), "vip_days": int(prize.get("vip_days") or 0)}
+                results.append(row)
+                self.save_data("dian115_wheel_records", (self._wheel_records() + [row])[-500:])
+                uncertain = False
+                self.save_data("dian115_wheel_last", {"date": today, "status": "进行中", "error": "", "uncertain": False})
+        except Exception as exc:
+            error = str(exc)[:160] if isinstance(exc, RuntimeError) else type(exc).__name__
+            logger.warning(f"癫影签到集成转盘停止：{error}")
+        finally:
+            self._wheel_lock.release()
+        outcome = {"status": "完成" if results and not error else ("提前结束" if results else "未抽奖"),
+                   "results": results, "error": error}
+        self.save_data("dian115_wheel_last", {"date": today,
+                                              "status": outcome["status"], "error": error, "uncertain": uncertain})
+        return outcome
+
+    @staticmethod
+    def _wheel_summary(wheel: dict) -> list:
+        if wheel is None:
+            return []
+        rows = wheel.get("results") or []
+        lines = [f"🎲 转盘：{wheel.get('status')} {len(rows)} 次" +
+                 (f"，消耗 {sum(int(r['cost']) for r in rows)} 积分" if rows else "")]
+        prizes = [str(r['label']) for r in rows]
+        lines.extend("  ｜  ".join(prizes[i:i + 2]) for i in range(0, len(prizes), 2))
+        if wheel.get("error"):
+            lines.append(f"⚠️ {wheel['error']}")
+        return lines
+
     # ======================== 定时任务 ========================
 
     def _sign_job(self, manual: bool = False):
@@ -810,6 +993,15 @@ class Dian115Sign(_PluginBase):
         else:
             logger.error(f"癫影签到最终失败：{result.get('msg')}")
 
+        if result.get("ok") and getattr(self, "_maximum_wheel", False):
+            result["wheel"] = self._wheel_run()
+            try:
+                fresh = self._fetch_me()
+                raw_points = fresh.get("points") if fresh else None
+                result["wheel_points"] = (int(raw_points) if raw_points is not None and
+                                          not isinstance(raw_points, bool) and int(raw_points) >= 0 else None)
+            except Exception:
+                result["wheel_points"] = None
         if self._notify:
             self._send_notify(result)
 
@@ -861,6 +1053,11 @@ class Dian115Sign(_PluginBase):
                 f"🕒 {now}",
             ])
 
+        if result.get("wheel") is not None:
+            wheel = result["wheel"]
+            sign_line = (f"✅ 签到：{'今日已签到' if result.get('already') else '成功，获得 ' + str(result.get('award', 0)) + ' 积分'}")
+            text = "\n".join([sign_line, *self._wheel_summary(wheel),
+                              f"💰 当前积分：{result.get('wheel_points') if result.get('wheel_points') is not None else '获取失败'}"])
         try:
             self.post_message(mtype=NotificationType.Plugin, title=title, text=text)
         except Exception as e:
@@ -936,7 +1133,7 @@ class Dian115Sign(_PluginBase):
 
         kpis = [
             ("🧑‍🚀", "账号昵称", str(nickname or "未获取"), "primary", f"邮箱：{(me or {}).get('email') or '—'}"),
-            ("💰", "当前积分", f"{int(points):,}" if isinstance(points, (int, float)) else "—", "info", "站点实时数据"),
+            ("💰", "当前积分", f"{int(points):,}" if isinstance(points, (int, float)) and not isinstance(points, bool) else "获取失败", "info", "站点实时数据"),
             ("🔥", "连续签到", f"{int(streak):,} 天" if isinstance(streak, (int, float)) else "—", "success", f"最近签到：{last_date or '—'}"),
             ("🧧", "累计获得", f"{total_award:,}", "warning", f"本地共记录 {success_days} 天"),
         ]
@@ -953,6 +1150,32 @@ class Dian115Sign(_PluginBase):
                 ],
             },
         ]
+
+        wheel_rows = self._wheel_records()
+        today = datetime.now().strftime("%Y-%m-%d")
+        today_rows = [r for r in wheel_rows if str(r.get("date") or "").startswith(today)]
+        latest = self.get_data("dian115_wheel_last") or {}
+        if not isinstance(latest, dict) or latest.get("date") != today:
+            latest = {}
+        if not getattr(self, "_maximum_wheel", False):
+            wheel_note = "未开启"
+        elif latest:
+            wheel_note = str(latest.get("status") or "未抽奖")
+            if latest.get("error"):
+                wheel_note += f" · {latest['error']}"
+        else:
+            wheel_note = "待签到后执行"
+        if today_rows:
+            wheel_note += " · 今日已确认 " + str(len(today_rows)) + " 次"
+            wheel_note += " · " + "、".join(str(row.get("label") or "未知") for row in today_rows[-4:])
+        page.append({"component": "VRow", "content": [{"component": "VCol", "props": {"cols": 12}, "content": [
+            {"component": "VCard", "props": {"variant": "tonal"}, "content": [
+                {"component": "VCardTitle", "text": "🎡 今日转盘"},
+                {"component": "VCardText", "props": {"style": "overflow-wrap:anywhere"}, "content": [
+                    {"component": "div", "text": wheel_note},
+                ]},
+            ]},
+        ]}]})
 
         # ---- 签到记录 ----
         rows = []

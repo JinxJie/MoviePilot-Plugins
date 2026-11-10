@@ -105,6 +105,11 @@ def build_form() -> Tuple[List[dict], Dict[str, Any]]:
                         col(12, switch("use_system_proxy", "🖥️ 使用系统代理", "info",
                                         hint="使用 MoviePilot 设置 → 系统 → 代理服务器 中配置的代理；开启后忽略上方自定义代理", persistent_hint=True)),
                     ]),
+                    row([
+                        col(12, switch("maximum_wheel", "🎡 签到后最大抽奖（消耗积分）", "warning",
+                                       hint="默认关闭；签到成功或今日已签到后，按站点今日剩余额度逐次抽奖。每次检查余额并至少保留 5 积分；手动运行同样会抽奖。请关闭独立转盘的定时任务，避免双重执行。",
+                                       persistent_hint=True)),
+                    ]),
                 ]),
 
                 # ── 调试 ──
@@ -126,6 +131,7 @@ def build_form() -> Tuple[List[dict], Dict[str, Any]]:
         "email": "",
         "password": "",
         "lucky_mode": False,
+        "maximum_wheel": False,
         "cron": "30 9 * * *",
         "retry": 3,
         "notify": True,
