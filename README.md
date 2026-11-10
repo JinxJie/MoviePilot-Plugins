@@ -11,7 +11,8 @@ JinxJie 的 [MoviePilot](https://github.com/jxxghp/MoviePilot) 第三方插件�
 | HHCLUB 自动抽奖 | [`plugins.v2/hhlottery`](plugins.v2/hhlottery) | 1.0.8 | 定时自动抽奖、大奖即时通知、盈亏统计、站内信清理 |
 | NodeSeek 自动签到 | [`plugins.v2/nodeseek`](plugins.v2/nodeseek) | 1.0.2 | NodeSeek 论坛每日自动签到、鸡腿收益统计、消息通知 |
 | 插件残留清理 | [`plugins.v2/pluginresidueclean`](plugins.v2/pluginresidueclean) | 1.0.1 | 风险分级、单项清理、清理后复扫、定时扫描通知，默认不自动删除 |
-| 癫影自动签到 | [`plugins.v2/dian115sign`](plugins.v2/dian115sign) | 1.0.3 | 每日签到、可选签到后最大抽奖、实时积分与合并通知 |
+| 癫影自动签到（V2） | [`plugins.v2/dian115sign`](plugins.v2/dian115sign) | 1.0.3 | 每日签到、可选签到后最大抽奖、实时积分与合并通知 |
+| 癫影自动签到（V3） | [`plugins.v3/dian115sign`](plugins.v3/dian115sign) | 2.0.0 | V3 原生接口、兼容字典系统代理，保留签到和默认关闭的抽奖功能 |
 | 癫影幸运转盘（V3） | [`plugins.v3/dian115wheel`](plugins.v3/dian115wheel) | 3.0.2 | 每日转盘、积分护栏、实时积分、双列奖品通知（消耗积分） |
 
 ## 📖 使用说明
@@ -153,9 +154,9 @@ NodeSeek 论坛每日自动签到，使用 curl_cffi 模拟 Chrome 浏览器指�
 </details>
 
 <details>
-<summary>4. 📅 癫影自动签到（Dian115Sign）</summary>
+<summary>4. 📅 癫影自动签到（Dian115Sign · V2 / V3）</summary>
 
-**v1.0.3 · 签到与可选转盘 · 癫影（dian115.com）**
+**V2 v1.0.3 / V3 v2.0.0 · 签到与可选转盘 · 癫影（dian115.com）**
 
 **功能：**
 癫影每日自动签到；可选在签到成功或今日已签到后，按站点剩余额度逐次运行付费转盘。首页展示签到状态、转盘状态与只读实时积分，通知合并展示签到和抽奖结果。使用 curl_cffi 模拟 Chrome 指纹，并以 ECDSA P-256 完成请求签名。
@@ -178,7 +179,7 @@ NodeSeek 论坛每日自动签到，使用 curl_cffi 模拟 Chrome 浏览器指�
 - 🚀 支持立即运行一次用于调试 Token 与网络；开启转盘时也会消耗积分。
 
 **使用说明：**
-1. 在 MoviePilot 插件管理中添加本仓库地址并安装插件。
+1. 在 MoviePilot 插件管理中添加本仓库地址；V2 安装 `plugins.v2/dian115sign`，V3 使用原生 `plugins.v3/dian115sign`。V3 升级前请备份原配置和签到记录，安装后检查 Token、Cron、代理及「签到后最大抽奖」开关（默认关闭）。
 2. 浏览器登录 m.dian115.com 后按 F12 → Application → Cookies → 复制 `__Host-portal_token` 的值，填入插件配置。
 3. 配置签到时间与签到模式（默认每天 09:30，普通签）。
 4. 可开启「立即运行一次」测试；**若同时开启「签到后最大抽奖」，手动运行也将消耗积分**。请先关闭独立转盘插件的定时任务，避免双重执行。需确保环境已安装 `curl_cffi` 与 `cryptography`；转盘记录与独立插件历史不自动合并。
@@ -187,6 +188,7 @@ NodeSeek 论坛每日自动签到，使用 curl_cffi 模拟 Chrome 浏览器指�
 本插件签到使用站点现有接口；开启转盘后会发起**消耗积分**的抽奖请求，结果随机，站点规则、接口及防护策略变更可能造成账号风险。请自行评估后启用；开发者不保证中奖或承担使用后果。
 
 **更新说明：**
+- V3 v2.0.0：新增 V3 原生实现，兼容字典或对象型系统代理；保留签到与默认关闭的签到后最大抽奖，修复签到签名格式并加强付费请求保护。以下 V2 历史记录继续保留。
 - v1.0.3：集成默认关闭的签到后最大抽奖开关；逐次核对额度与积分，首页和合并通知展示转盘状态、结果及实时积分。
 - v1.0.2：补充 curl_cffi 与 cryptography 依赖声明，修复 MoviePilot V3 重装后依赖未自动安装导致无法模拟浏览器指纹的问题。
 - v1.0.1：修复浏览器指纹回退链（chrome110 优先）；Token 兼容整段 Cookie 粘贴；手动测试不再被启用开关拦截；图标改为 GitHub CDN 地址；新增系统代理开关（默认开）。
