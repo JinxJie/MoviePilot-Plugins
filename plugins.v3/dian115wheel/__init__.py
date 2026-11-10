@@ -49,6 +49,10 @@ class Dian115Wheel(_PluginBase):
         self._maximum_spins = False
         self._max_spins = 1
         self._min_balance = 5
+        self._monopoly_max_spins = 1
+        self._monopoly_min_balance = 5
+        self._monopoly_maximum_spins = False
+        self._monopoly_spin_mode = "custom"
         self._notify = True
         self._use_system_proxy = True
         self._proxy = ""
@@ -76,6 +80,13 @@ class Dian115Wheel(_PluginBase):
         self._monopoly_enabled = bool(config.get("monopoly_enabled", old_game == "monopoly"))
         self._max_spins = max(1, min(100, int(config.get("max_spins") if config.get("max_spins") is not None else 1)))
         self._min_balance = max(0, int(config.get("min_balance") if config.get("min_balance") is not None else 5))
+        # 旧版共用玩法设置仅在没有大富翁专属字段时沿用，避免改变原有用户行为。
+        self._monopoly_maximum_spins = bool(config.get("monopoly_maximum_spins", self._maximum_spins))
+        self._monopoly_spin_mode = "maximum" if self._monopoly_maximum_spins else "custom"
+        monopoly_spins = config.get("monopoly_max_spins", self._max_spins)
+        monopoly_balance = config.get("monopoly_min_balance", self._min_balance)
+        self._monopoly_max_spins = max(1, min(100, int(monopoly_spins if monopoly_spins is not None else 1)))
+        self._monopoly_min_balance = max(0, int(monopoly_balance if monopoly_balance is not None else 5))
         self._notify = bool(config.get("notify", True))
         self._use_system_proxy = bool(config.get("use_system_proxy", True))
         self._proxy = str(config.get("proxy") or "").strip()
@@ -84,6 +95,9 @@ class Dian115Wheel(_PluginBase):
                                 "wheel_enabled": self._wheel_enabled, "monopoly_enabled": self._monopoly_enabled,
                                 "spin_mode": self._spin_mode, "maximum_spins": self._maximum_spins,
                                 "max_spins": self._max_spins, "min_balance": self._min_balance,
+                                "monopoly_maximum_spins": self._monopoly_maximum_spins,
+                                "monopoly_max_spins": self._monopoly_max_spins,
+                                "monopoly_min_balance": self._monopoly_min_balance,
                                 "notify": self._notify, "use_system_proxy": self._use_system_proxy,
                                 "proxy": self._proxy, "onlyonce": False})
             # 不阻塞配置保存；手动运行也要遵守积分和次数护栏
@@ -398,7 +412,7 @@ class Dian115Wheel(_PluginBase):
             progress = self.get_data("monopoly_progress")
             if not isinstance(progress, dict) or progress.get("date") != today:
                 progress = None
-            for _ in range(self._max_spins if self._spin_mode == "custom" else 100):
+            for _ in range(self._monopoly_max_spins if self._monopoly_spin_mode == "custom" else 100):
                 if self._monopoly_pending():
                     raise RuntimeError("大富翁结果仍待核对；今日不再自动游玩")
                 status = self._request("GET", self.STATUS)
@@ -421,8 +435,8 @@ class Dian115Wheel(_PluginBase):
                     error = "今日大富翁次数已用完或站点未开放"
                     break
                 points = self._current_points()
-                if points - cost < self._min_balance:
-                    error = f"积分不足：余额 {points}，单次消耗 {cost}，需保留 {self._min_balance}"
+                if points - cost < self._monopoly_min_balance:
+                    error = f"积分不足：余额 {points}，单次消耗 {cost}，需保留 {self._monopoly_min_balance}"
                     break
                 # POST 前落盘；若请求结果未知，重启后也不可再次消费。
                 today = datetime.now().date().isoformat()
@@ -491,10 +505,13 @@ class Dian115Wheel(_PluginBase):
             field("VTextField", "token", "癫影 __Host-portal_token", type="password", hint="登录 m.dian115.com 后从浏览器 Cookie 复制；不与签到插件共享登录状态", persistent_hint=True),
             field("VTextField", "cron", "Cron（默认每天 10:00）"),
             field("VSwitch", "wheel_enabled", "运行幸运大转盘", hint="默认开启；与大富翁同时开启时先执行转盘", persistent_hint=True),
+            field("VTextField", "max_spins", "转盘 · 自定义次数", type="number", min="1", max="100", hint="转盘最大次数关闭时，每轮按此次数抽奖（默认 1 次）", persistent_hint=True),
+            field("VSwitch", "maximum_spins", "转盘 · 最大次数", hint="按转盘今日剩余额度抽奖，忽略转盘自定义次数；仍受转盘积分保留限制", persistent_hint=True),
+            field("VTextField", "min_balance", "转盘 · 至少保留积分", type="number", min="0"),
             field("VSwitch", "monopoly_enabled", "运行幸运大富翁", hint="默认关闭；与转盘同时开启时排在转盘之后", persistent_hint=True),
-            field("VTextField", "max_spins", "自定义次数", type="number", min="1", max="100", hint="最大次数关闭时，每轮按此次数抽奖（默认 1 次）", persistent_hint=True),
-            field("VSwitch", "maximum_spins", "最大次数", hint="开启时改为按站点今日剩余额度抽奖，忽略自定义次数；仍受积分保留限制", persistent_hint=True),
-            field("VTextField", "min_balance", "抽奖后至少保留积分", type="number", min="0"),
+            field("VTextField", "monopoly_max_spins", "大富翁 · 自定义次数", type="number", min="1", max="100", hint="大富翁最大次数关闭时，每轮按此次数游玩（默认 1 次）", persistent_hint=True),
+            field("VSwitch", "monopoly_maximum_spins", "大富翁 · 最大次数", hint="按大富翁今日剩余额度游玩，忽略大富翁自定义次数；仍受大富翁积分保留限制", persistent_hint=True),
+            field("VTextField", "monopoly_min_balance", "大富翁 · 至少保留积分", type="number", min="0"),
             field("VSwitch", "notify", "中奖结果通知"),
             field("VSwitch", "use_system_proxy", "使用系统代理（默认开启）"),
             field("VTextField", "proxy", "自定义代理（关闭系统代理时生效）"),
@@ -502,7 +519,8 @@ class Dian115Wheel(_PluginBase):
             {"component": "VAlert", "props": {"type": "warning", "variant": "tonal", "text": "两种玩法均会消耗积分；分别开启时按转盘→大富翁执行，转盘结果不明则停止，避免继续扣分；最大次数按各玩法当日剩余额度执行，逐次检查积分与限额。"}},
         ]}]
         return form, {"enabled": False, "token": "", "cron": "0 10 * * *", "wheel_enabled": True, "monopoly_enabled": False, "maximum_spins": False, "max_spins": 1,
-                      "min_balance": 5, "notify": True, "use_system_proxy": True, "proxy": "", "onlyonce": False}
+                      "min_balance": 5, "monopoly_maximum_spins": False, "monopoly_max_spins": 1, "monopoly_min_balance": 5,
+                      "notify": True, "use_system_proxy": True, "proxy": "", "onlyonce": False}
 
     def get_page(self):
         all_records = self._records()

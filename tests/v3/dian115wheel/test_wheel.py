@@ -118,13 +118,16 @@ class WheelTests(unittest.TestCase):
         fields = form[0]["content"]
         by_model = {f.get("props", {}).get("model"): f for f in fields if "model" in f.get("props", {})}
         self.assertEqual(by_model["max_spins"]["component"], "VTextField")
-        self.assertEqual(by_model["max_spins"]["props"]["label"], "自定义次数")
+        self.assertEqual(by_model["max_spins"]["props"]["label"], "转盘 · 自定义次数")
         self.assertEqual(by_model["maximum_spins"]["component"], "VSwitch")
-        self.assertEqual(by_model["maximum_spins"]["props"]["label"], "最大次数")
+        self.assertEqual(by_model["maximum_spins"]["props"]["label"], "转盘 · 最大次数")
         self.assertEqual(by_model["wheel_enabled"]["component"], "VSwitch")
         self.assertEqual(by_model["monopoly_enabled"]["component"], "VSwitch")
         self.assertTrue(defaults["wheel_enabled"])
         self.assertFalse(defaults["monopoly_enabled"])
+        self.assertEqual(defaults["monopoly_max_spins"], 1)
+        self.assertFalse(defaults["monopoly_maximum_spins"])
+        self.assertEqual(defaults["monopoly_min_balance"], 5)
         self.assertFalse(any(f["component"] == "VSelect" for f in fields))
         self.assertNotIn("spin_mode", by_model)
         self.assertEqual(form[0]["component"], "VForm")
@@ -144,6 +147,69 @@ class WheelTests(unittest.TestCase):
         from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
         der = encode_dss_signature(int.from_bytes(signature[:32], "big"), int.from_bytes(signature[32:], "big"))
         p._key.public_key().verify(der, message, ec.ECDSA(hashes.SHA256()))
+
+    def test_each_game_uses_own_count_and_balance(self):
+        p = Dian115Wheel()
+        p.init_plugin({"token": "test-token", "wheel_enabled": True, "monopoly_enabled": True,
+                       "max_spins": 1, "min_balance": 5, "monopoly_max_spins": 2,
+                       "monopoly_min_balance": 50, "notify": False})
+        calls = []
+        def fake(method, path, **kwargs):
+            calls.append((method, path))
+            if path == p.STATUS:
+                return {"items": {"daily_wheel": {"used_today": 0, "max_plays": 5, "cost": 5},
+                                  "monopoly": {"used_today": 0, "max_plays": 5, "cost": 7}}}
+            if path == p.ME:
+                return {"user": {"points": 100}}
+            if path == p.WHEEL:
+                return {"cost": 5, "prize": {"label": "积分", "points": 2}}
+            if path == p.MONOPOLY:
+                return {"award_points": 3, "steps": [{"pos": 1}]}
+            self.fail("unexpected endpoint")
+        p._request = fake
+        self.assertEqual(p._run()["code"], 0)
+        self.assertEqual([path for method, path in calls if method == "POST"],
+                         [p.WHEEL, p.MONOPOLY, p.MONOPOLY])
+        p2 = Dian115Wheel()
+        p2.init_plugin({"token": "test-token", "wheel_enabled": True, "monopoly_enabled": True,
+                        "max_spins": 1, "min_balance": 100, "monopoly_max_spins": 1,
+                        "monopoly_min_balance": 90, "notify": False})
+        calls.clear()
+        p2._request = fake
+        self.assertEqual(p2._run()["code"], 0)
+        self.assertEqual([path for method, path in calls if method == "POST"], [p.MONOPOLY])
+
+    def test_independent_game_settings_and_legacy_wheel_config(self):
+        p = Dian115Wheel()
+        p.init_plugin({"token": "test-token", "max_spins": 2, "maximum_spins": True,
+                       "min_balance": 18, "monopoly_max_spins": 4,
+                       "monopoly_maximum_spins": False, "monopoly_min_balance": 36})
+        self.assertEqual((p._max_spins, p._spin_mode, p._min_balance), (2, "maximum", 18))
+        self.assertEqual((p._monopoly_max_spins, p._monopoly_spin_mode, p._monopoly_min_balance),
+                         (4, "custom", 36))
+        form, defaults = p.get_form()
+        fields = form[0]["content"]
+        wheel = next(f for f in fields if f.get("props", {}).get("model") == "wheel_enabled")
+        monopoly = next(f for f in fields if f.get("props", {}).get("model") == "monopoly_enabled")
+        self.assertLess(fields.index(wheel), fields.index(monopoly))
+        self.assertEqual([f["props"]["model"] for f in fields[fields.index(wheel)+1:fields.index(monopoly)]],
+                         ["max_spins", "maximum_spins", "min_balance"])
+        self.assertEqual([f["props"]["model"] for f in fields[fields.index(monopoly)+1:fields.index(monopoly)+4]],
+                         ["monopoly_max_spins", "monopoly_maximum_spins", "monopoly_min_balance"])
+        self.assertEqual(defaults["max_spins"], defaults["monopoly_max_spins"])
+        legacy = Dian115Wheel()
+        legacy.init_plugin({"token": "test-token", "game": "monopoly", "max_spins": 3,
+                            "maximum_spins": True, "min_balance": 27})
+        self.assertEqual((legacy._monopoly_max_spins, legacy._monopoly_spin_mode,
+                          legacy._monopoly_min_balance), (3, "maximum", 27))
+        with patch.object(module.threading, "Thread"):
+            legacy.init_plugin({"token": "test-token", "game": "monopoly", "onlyonce": True,
+                                "max_spins": 3, "maximum_spins": True, "min_balance": 27,
+                                "monopoly_max_spins": 4, "monopoly_maximum_spins": False,
+                                "monopoly_min_balance": 36})
+        self.assertEqual((legacy.saved_config["monopoly_max_spins"],
+                          legacy.saved_config["monopoly_maximum_spins"],
+                          legacy.saved_config["monopoly_min_balance"]), (4, False, 36))
 
     def test_lifecycle_and_one_shot_config_reset(self):
         p = Dian115Wheel()
@@ -695,7 +761,7 @@ class MonopolyTests(unittest.TestCase):
                 self.assertEqual(self.p._run()["code"], 1)
                 self.assertEqual(self.calls, [("GET", self.p.STATUS)])
         self.calls.clear()
-        self.p._min_balance = 15
+        self.p._monopoly_min_balance = 15
         self.p._request = self.fake
         self.assertEqual(self.p._run()["code"], 1)
         self.assertNotIn(("POST", self.p.MONOPOLY), self.calls)
@@ -727,8 +793,8 @@ class MonopolyTests(unittest.TestCase):
         self.assertEqual(self.p.get_data("monopoly_pending"), module.datetime.now().date().isoformat())
 
     def test_maximum_caps_at_initial_quota_despite_stale_counter(self):
-        self.p._spin_mode = "maximum"
-        self.p._max_spins = 1
+        self.p._monopoly_spin_mode = "maximum"
+        self.p._monopoly_max_spins = 1
         def stale(method, path, **kw):
             if path == self.p.STATUS:
                 self.calls.append((method, path))
@@ -740,8 +806,8 @@ class MonopolyTests(unittest.TestCase):
         self.assertEqual(self.calls.count(("POST", self.p.MONOPOLY)), 2)
 
     def test_custom_mode_caps_at_initial_quota_despite_stale_counter(self):
-        self.p._spin_mode = "custom"
-        self.p._max_spins = 5
+        self.p._monopoly_spin_mode = "custom"
+        self.p._monopoly_max_spins = 5
         def stale(method, path, **kw):
             if path == self.p.STATUS:
                 self.calls.append((method, path))
@@ -754,7 +820,7 @@ class MonopolyTests(unittest.TestCase):
 
     def test_stale_site_quota_across_runs_cannot_double_spend(self):
         self.p._request = self.fake
-        self.p._max_spins = 1
+        self.p._monopoly_max_spins = 1
         self.assertEqual(self.p._run()["code"], 0)
         self.assertEqual(self.p._run()["code"], 0)
         self.assertEqual(self.p._run()["code"], 1)
