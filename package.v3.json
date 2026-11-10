@@ -12,5 +12,17 @@
       "v3.0.1": "修复 Cookie 规范化与会话浏览器回退；浏览器继承系统代理，备用登录动态读取验证码 sitekey 并保留真实失败原因。",
       "v3.0.0": "新增 MoviePilot V3 原生实现：使用 app.sdk 稳定接口、V3 托管浏览器上下文和 pyproject.toml 依赖声明。"
     }
+  },
+  "Dian115Wheel": {
+    "name": "癫影幸运转盘（V3）",
+    "description": "癫影每日幸运转盘，支持定时运行、抽奖次数及最低保留积分限制、结果记录与通知。每次抽奖消耗站点积分。",
+    "labels": "癫影,幸运转盘,抽奖,自动化",
+    "version": "1.0.0",
+    "icon": "https://raw.githubusercontent.com/JinxJie/MoviePilot-Plugins/main/icons/dian115sign.png",
+    "author": "JinxJie",
+    "level": 2,
+    "release": false,
+    "system_version": ">=3.0.0",
+    "history": {"v1.0.0": "首个 V3 原生版本：定时与手动转盘、每日次数及积分护栏、记录和通知。"}
   }
 }

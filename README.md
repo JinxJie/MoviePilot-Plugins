@@ -12,6 +12,7 @@ JinxJie 的 [MoviePilot](https://github.com/jxxghp/MoviePilot) 第三方插件�
 | NodeSeek 自动签到 | [`plugins.v2/nodeseek`](plugins.v2/nodeseek) | 1.0.2 | NodeSeek 论坛每日自动签到、鸡腿收益统计、消息通知 |
 | 插件残留清理 | [`plugins.v2/pluginresidueclean`](plugins.v2/pluginresidueclean) | 1.0.1 | 风险分级、单项清理、清理后复扫、定时扫描通知，默认不自动删除 |
 | 癫影自动签到 | [`plugins.v2/dian115sign`](plugins.v2/dian115sign) | 1.0.2 | 癫影每日自动签到、普通签/运气签开关、积分与连续签到统计、结果通知 |
+| 癫影幸运转盘（V3） | [`plugins.v3/dian115wheel`](plugins.v3/dian115wheel) | 1.0.0 | 每日转盘、次数和积分保留限制、记录与通知（消耗积分） |
 
 ## 📖 使用说明
 
@@ -190,6 +191,37 @@ NodeSeek 论坛每日自动签到，使用 curl_cffi 模拟 Chrome 浏览器指�
 
 </details>
 
+<details>
+<summary>5. 🎡 癫影幸运转盘（Dian115Wheel · V3）</summary>
+
+**v1.0.0 · 站点自动化 · 癫影（m.dian115.com）**
+
+**功能：**
+通过癫影站点每日转盘接口运行手动或 Cron 定时抽奖，记录积分消耗、奖励及 VIP 天数。
+
+**标签：**
+幸运转盘、积分、定时任务、消息通知
+
+**特点：**
+- 默认关闭；每轮最多抽 1 次，至少保留 5 积分，可自行设定上限。
+- 抽奖前读取站点每日限额、次数、单次成本和余额；达到限制即停止。
+- 每次抽奖消耗积分，POST 失败不自动重试，避免重复扣分。
+- 支持系统代理（默认开启）及自定义代理，采用 browser-session 与 ECDSA 请求签名。
+- 本地记录和通知；配置页「立即运行一次」以及已鉴权的 POST `/spin` 可手动执行。
+
+**使用说明：**
+1. 从癫影浏览器 Cookie 获取 `__Host-portal_token`，填入插件配置；不与签到插件共享登录状态。
+2. 先配置每轮最大次数与最低保留积分。定时执行需主动启用，默认每天 10:00；手动抽奖同样消耗积分。
+3. V3 插件依赖 `curl_cffi` 与 `cryptography`；Token 过期后须自行更新。已用真实账号验证单次抽奖接口（站点扣 5 积分，奖励 3 积分）；尚未在 MoviePilot V3 宿主安装验收。
+
+**免责声明：**
+抽奖存在积分消耗和随机结果；站点规则、接口及成本可能变动。请自行评估，插件不保证中奖，也不代替站点风控规则。
+
+**更新说明：**
+- v1.0.0：首版 V3 原生实现，支持定时和手动转盘、积分护栏、结果记录与通知。
+
+</details>
+
 ## ⚠️ 注意事项
 
 - 本插件库中的插件均为个人维护，使用前请仔细阅读说明。
@@ -211,6 +243,7 @@ MoviePilot-Plugins/
 │   ├── nodeseek/               # NodeSeek 自动签到（V2）
 │   └── pluginresidueclean/     # 插件残留清理
 ├── plugins.v3/                 # MoviePilot V3 原生插件
+│   ├── dian115wheel/           # 癫影幸运转盘（V3）
 │   └── nodeseek/               # NodeSeek 自动签到（V3）
 ├── scripts/                    # 上游辅助脚本
 ├── tests/                      # 上游测试与插件测试支撑
