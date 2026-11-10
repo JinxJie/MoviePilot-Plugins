@@ -186,6 +186,78 @@ class WheelTests(unittest.TestCase):
         self.assertEqual(p.data["wheel_records"][0]["points"], 3)
         self.assertTrue(p.get_page())
 
+    def test_current_points_page_is_read_only_and_never_uses_old_balance(self):
+        p = self.plugin
+        calls = []
+        def fake(method, path, **kw):
+            calls.append((method, path))
+            return {"user": {"points": 12345678901234567890}}
+        p._request = fake
+        page = p.get_page()
+        self.assertEqual(calls, [("GET", p.ME)])
+        self.assertEqual(page[0]["content"][0]["content"][0]["content"][0]["content"][0]["text"], "12345678901234567890")
+        self.assertIn("当前积分", page[0]["content"][0]["content"][0]["content"][0]["content"][1]["text"])
+        p._request = lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("offline"))
+        page = p.get_page()
+        self.assertEqual(page[0]["content"][0]["content"][0]["content"][0]["content"][0]["text"], "获取失败")
+
+    def test_notification_pairs_prizes_and_shows_balance(self):
+        p = self.plugin
+        p._notify = True
+        p._max_spins = 3
+        calls = []
+        prizes = iter(("3 积分", "5 积分", "谢谢参与"))
+        def fake(method, path, **kw):
+            calls.append((method, path))
+            if path == p.STATUS:
+                return {"items": {"daily_wheel": {"used_today": 0, "max_plays": 20, "cost": 5}}}
+            if path == p.ME:
+                return {"user": {"points": 100 if calls.count(("POST", p.WHEEL)) < 3 else 91}}
+            return {"cost": 5, "prize": {"label": next(prizes), "points": 0}}
+        p._request = fake
+        self.assertEqual(len(p._run()["data"]), 3)
+        self.assertEqual(calls.count(("POST", p.WHEEL)), 3)
+        self.assertEqual(len(p.notices), 1)
+        self.assertEqual(p.notices[0]["title"], "癫影幸运转盘 · 抽奖完成")
+        self.assertEqual(p.notices[0]["text"],
+                         "🎲 本轮抽奖：3 次  ｜  消耗积分：15\n💰 当前积分：91\n\n"
+                         "🎁 奖品结果\n3 积分  ｜  5 积分\n谢谢参与")
+
+    def test_notification_balance_failure_is_explicit_and_stop_reason_retained(self):
+        p = self.plugin
+        p._notify = True
+        p._max_spins = 2
+        calls = []
+        def fake(method, path, **kw):
+            calls.append((method, path))
+            if path == p.STATUS:
+                if calls.count(("POST", p.WHEEL)):
+                    raise RuntimeError("站点暂停")
+                return {"items": {"daily_wheel": {"used_today": 0, "max_plays": 20, "cost": 5}}}
+            if path == p.ME:
+                if calls.count(("POST", p.WHEEL)):
+                    raise RuntimeError("余额不可读")
+                return {"user": {"points": 100}}
+            return {"cost": 5, "prize": {"label": "3 积分", "points": 3}}
+        p._request = fake
+        p._run()
+        self.assertEqual(calls.count(("POST", p.WHEEL)), 1)
+        self.assertIn("💰 当前积分：获取失败", p.notices[0]["text"])
+        self.assertIn("⚠️ 提前结束：站点暂停", p.notices[0]["text"])
+
+    def test_invalid_points_are_not_presented_as_balance(self):
+        p = self.plugin
+        for value in (None, True, -1):
+            with self.subTest(value=value):
+                p._request = lambda *a, **kw: {"user": {"points": value}}
+                with self.assertRaises(ValueError):
+                    p._current_points()
+
+    def test_missing_token_page_does_not_fetch_balance(self):
+        p = Dian115Wheel()
+        p._request = lambda *a, **kw: self.fail("missing token must not fetch")
+        self.assertEqual(p.get_page()[0]["content"][0]["content"][0]["content"][0]["content"][0]["text"], "获取失败")
+
     def test_switch_mode_resolution_and_legacy_configuration(self):
         for config, expected in (
             ({}, "custom"),

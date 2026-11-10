@@ -25,7 +25,7 @@ class Dian115Wheel(_PluginBase):
     plugin_name = "癫影幸运转盘"
     plugin_desc = "癫影每日幸运转盘：可选定时抽奖、次数与余额限制、中奖记录及通知。每次抽奖会消耗站点积分。"
     plugin_icon = "https://raw.githubusercontent.com/JinxJie/MoviePilot-Plugins/main/icons/dian115wheel.png"
-    plugin_version = "3.0.0"
+    plugin_version = "3.0.1"
     plugin_author = "JinxJie"
     author_url = "https://github.com/JinxJie"
     plugin_config_prefix = "dian115wheel_"
@@ -202,6 +202,27 @@ class Dian115Wheel(_PluginBase):
         data = self.get_data("wheel_records") or []
         return data if isinstance(data, list) else []
 
+    def _current_points(self):
+        """只读站点实时积分；失败时不使用上次抽奖前的余额冒充当前值。"""
+        data = self._request("GET", self.ME)
+        value = (data.get("user") or {}).get("points")
+        if isinstance(value, bool) or value is None:
+            raise ValueError("站点未返回有效积分")
+        points = int(value)
+        if points < 0:
+            raise ValueError("站点未返回有效积分")
+        return points
+
+    @staticmethod
+    def _notification_text(results, balance, error=""):
+        prizes = [str(row["label"]) for row in results]
+        prize_lines = ["  ｜  ".join(prizes[i:i + 2]) for i in range(0, len(prizes), 2)]
+        lines = [f"🎲 本轮抽奖：{len(results)} 次  ｜  消耗积分：{sum(int(r['cost']) for r in results)}",
+                 f"💰 当前积分：{balance if balance is not None else '获取失败'}", "", "🎁 奖品结果", *prize_lines]
+        if error:
+            lines.extend(["", f"⚠️ 提前结束：{error}"])
+        return "\n".join(lines)
+
     def _run(self):
         if not self._lock.acquire(blocking=False):
             return {"code": 1, "msg": "抽奖任务正在运行"}
@@ -254,9 +275,14 @@ class Dian115Wheel(_PluginBase):
             error = str(exc)[:200] if isinstance(exc, RuntimeError) else type(exc).__name__
             logger.warning(f"癫影转盘执行中断：{error}")
         if results and self._notify:
-            labels = "、".join(r["label"] for r in results)
             try:
-                self.post_message(mtype=NotificationType.Plugin, title="癫影幸运转盘", text=f"抽奖 {len(results)} 次：{labels}" + (f"；{error}" if error else ""))
+                balance = self._current_points()
+            except Exception:
+                balance = None
+                logger.warning("癫影转盘通知读取当前积分失败")
+            try:
+                self.post_message(mtype=NotificationType.Plugin, title="癫影幸运转盘 · 抽奖完成",
+                                  text=self._notification_text(results, balance, error))
             except Exception:
                 logger.warning("癫影转盘通知发送失败")
         return {"code": 0 if results else 1, "msg": f"完成 {len(results)} 次" + (f"；{error}" if error else ""), "data": results}
@@ -301,19 +327,26 @@ class Dian115Wheel(_PluginBase):
     def get_page(self):
         all_records = self._records()
         records = list(reversed(all_records[-20:]))
-        def item(label, value):
-            return {"component": "VCol", "props": {"cols": 6, "md": 3}, "content": [
-                {"component": "VCard", "props": {"variant": "tonal"}, "content": [
+        try:
+            current_points = self._current_points() if self._token else None
+        except Exception:
+            current_points = None
+            logger.warning("癫影转盘首页读取当前积分失败")
+        def item(label, value, balance=False):
+            return {"component": "VCol", "props": {"cols": 12 if balance else 6, "md": 12 if balance else 3}, "content": [
+                {"component": "VCard", "props": {"variant": "tonal", **({"color": "info"} if balance else {})}, "content": [
                     {"component": "VCardText", "props": {"class": "text-center"}, "content": [
                         {"component": "div", "props": {"style": "font-size:clamp(1rem,4vw,1.5rem);overflow-wrap:anywhere;"}, "text": str(value)},
                         {"component": "div", "props": {"class": "text-caption"}, "text": label}]}]}]}
         total_cost = sum(int(r.get("cost") or 0) for r in all_records)
         total_points = sum(int(r.get("points") or 0) for r in all_records)
-        cards = [item("已记录抽奖", len(all_records)), item("消耗积分", total_cost), item("奖励积分", total_points),
-                 item("净积分", total_points - total_cost)]
+        cards = [item("已记录抽奖", len(all_records)), item("消耗积分", total_cost),
+                 item("奖励积分", total_points), item("净积分", total_points - total_cost)]
+        balance_card = item("当前积分（实时）", current_points if current_points is not None else "获取失败", balance=True)
         rows = [{"component": "tr", "content": [{"component": "td", "text": str(r.get(k) if r.get(k) is not None else "—")}
                 for k in ("date", "label", "cost", "points", "vip_days")]} for r in records]
-        return [{"component": "VRow", "content": cards}, {"component": "VCard", "props": {"class": "mt-3"}, "content": [
+        return [{"component": "VRow", "content": [balance_card]},
+                {"component": "VRow", "content": cards}, {"component": "VCard", "props": {"class": "mt-3"}, "content": [
             {"component": "VCardTitle", "text": "最近抽奖记录（站点结果，以本地记录为准）"},
             {"component": "VCardText", "props": {"style": "overflow-x:auto"}, "content": [
                 {"component": "VTable", "props": {"style": "min-width:540px"}, "content": [

@@ -15,15 +15,16 @@
   },
   "Dian115Wheel": {
     "name": "癫影幸运转盘（V3）",
-    "description": "癫影每日幸运转盘，支持定时运行、抽奖次数及最低保留积分限制、结果记录与通知。每次抽奖消耗站点积分。",
+    "description": "癫影每日幸运转盘，支持定时运行、抽奖次数及最低保留积分限制、实时积分展示、双列奖品结果与通知。每次抽奖消耗站点积分。",
     "labels": "癫影,幸运转盘,抽奖,自动化",
-    "version": "3.0.0",
+    "version": "3.0.1",
     "icon": "https://raw.githubusercontent.com/JinxJie/MoviePilot-Plugins/main/icons/dian115wheel.png",
     "author": "JinxJie",
     "level": 2,
     "release": false,
     "system_version": ">=3.0.0",
     "history": {
+      "v3.0.1": "首页实时显示站点积分；抽奖通知展示结束时积分，奖品每行两个，并保留提前结束原因。",
       "v3.0.0": "V3 原生插件版本统一从 3.0.0 起；支持定时与手动转盘、每日次数及积分护栏、记录和通知。",
       "v1.0.0": "首个 V3 原生版本：定时与手动转盘、每日次数及积分护栏、记录和通知。"
     }
