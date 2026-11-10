@@ -25,7 +25,7 @@ class Dian115Wheel(_PluginBase):
     plugin_name = "癫影幸运转盘"
     plugin_desc = "癫影每日幸运转盘：可选定时抽奖、次数与余额限制、中奖记录及通知。每次抽奖会消耗站点积分。"
     plugin_icon = "https://raw.githubusercontent.com/JinxJie/MoviePilot-Plugins/main/icons/dian115wheel.png"
-    plugin_version = "3.0.1"
+    plugin_version = "3.0.2"
     plugin_author = "JinxJie"
     author_url = "https://github.com/JinxJie"
     plugin_config_prefix = "dian115wheel_"
@@ -97,7 +97,11 @@ class Dian115Wheel(_PluginBase):
 
     @staticmethod
     def _system_proxy():
-        proxy = getattr(getattr(settings, "PROXY", None), "host", None)
+        raw = getattr(settings, "PROXY", None)
+        if isinstance(raw, dict):
+            proxy = raw.get("https") or raw.get("http")
+        else:
+            proxy = getattr(raw, "host", None)
         return str(proxy or os.environ.get("PROXY_HOST") or os.environ.get("https_proxy") or os.environ.get("HTTPS_PROXY") or "").split(",")[0].strip()
 
     def _http(self):

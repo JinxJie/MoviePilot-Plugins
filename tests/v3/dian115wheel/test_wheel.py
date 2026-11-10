@@ -57,6 +57,55 @@ class WheelTests(unittest.TestCase):
         self.plugin._token = "fake-for-test-only"
         self.plugin._notify = False
 
+    def test_system_proxy_dict_is_used_by_http_session(self):
+        class FakeSession:
+            def __init__(self, **kwargs):
+                self.proxies = {}
+                self.calls = []
+
+            def get(self, url, **kwargs):
+                self.calls.append(url)
+
+        settings = module.settings
+        with patch.object(settings, "PROXY", {"http": "http://http.example:8080",
+                                              "https": "http://https.example:8080"}), \
+                patch.dict(module.os.environ, {}, clear=True), \
+                patch.object(module, "curl_requests", types.SimpleNamespace(Session=FakeSession)):
+            session = self.plugin._http()
+        self.assertEqual(session.proxies, {"http": "http://https.example:8080",
+                                           "https": "http://https.example:8080"})
+        self.assertEqual(len(session.calls), 1)
+
+    def test_system_proxy_formats_and_fallback(self):
+        cases = [
+            ({"http": "http://http.example:8080"}, {}, "http://http.example:8080"),
+            ({"http": "http://http.example:8080", "https": ""}, {}, "http://http.example:8080"),
+            (types.SimpleNamespace(host="http://legacy.example:8080"), {}, "http://legacy.example:8080"),
+            ({}, {"PROXY_HOST": "http://env.example:8080"}, "http://env.example:8080"),
+            (None, {}, ""),
+        ]
+        for raw, env, expected in cases:
+            with self.subTest(raw_type=type(raw).__name__, expected=expected), \
+                    patch.object(module.settings, "PROXY", raw), \
+                    patch.dict(module.os.environ, env, clear=True):
+                self.assertEqual(self.plugin._system_proxy(), expected)
+
+    def test_custom_proxy_when_system_proxy_disabled(self):
+        class FakeSession:
+            def __init__(self, **kwargs):
+                self.proxies = {}
+
+            def get(self, url, **kwargs):
+                pass
+
+        self.plugin._use_system_proxy = False
+        self.plugin._proxy = "http://custom.example:8080"
+        with patch.object(module.settings, "PROXY", {"https": "http://system.example:8080"}), \
+                patch.object(module, "curl_requests", types.SimpleNamespace(Session=FakeSession)):
+            session = self.plugin._http()
+        self.assertEqual(session.proxies, {"http": "http://custom.example:8080",
+                                           "https": "http://custom.example:8080"})
+
     def test_defaults_are_inert_and_v3_manifest_form(self):
         p = Dian115Wheel()
         self.assertFalse(p.get_state())
