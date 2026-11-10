@@ -122,14 +122,27 @@ class Dian115Wheel(_PluginBase):
             result["Cookie"] = "__Host-portal_token=" + self._token
         return result
 
+    @staticmethod
+    def _check_bootstrap_response(response, stage):
+        # 仅使用响应状态码；异常字符串和响应内容可能包含凭据。
+        try:
+            response.raise_for_status()
+        except Exception:
+            status = getattr(response, "status_code", None)
+            status = status if isinstance(status, int) and not isinstance(status, bool) and 100 <= status <= 599 else "未知"
+            raise RuntimeError(f"{stage} 失败：HTTP {status}") from None
+
     def _ensure_browser_session(self, force=False):
         now = time.time()
         if not force and now < self._session_expiry:
             return
         http = self._http()
-        proof_response = http.get(self.BASE + self.API + "/auth/browser-challenge",
-                                  headers=self._headers(), timeout=15)
-        proof_response.raise_for_status()
+        try:
+            proof_response = http.get(self.BASE + self.API + "/auth/browser-challenge",
+                                      headers=self._headers(), timeout=15)
+        except Exception as exc:
+            raise RuntimeError(f"browser-challenge 请求失败：{type(exc).__name__}") from None
+        self._check_bootstrap_response(proof_response, "browser-challenge")
         challenge = proof_response.json()
         if challenge.get("enabled") is False:
             self._key = None
@@ -146,9 +159,12 @@ class Dian115Wheel(_PluginBase):
                "y": self._b64(numbers.y.to_bytes(32, "big"))}
         headers = self._headers()
         headers["X-Portal-Browser-Proof"] = self._proof
-        response = http.post(self.BASE + self.API + "/auth/browser-session",
-                             json={"public_jwk": jwk, "signature_version": 2}, headers=headers, timeout=15)
-        response.raise_for_status()
+        try:
+            response = http.post(self.BASE + self.API + "/auth/browser-session",
+                                 json={"public_jwk": jwk, "signature_version": 2}, headers=headers, timeout=15)
+        except Exception as exc:
+            raise RuntimeError(f"browser-session 请求失败：{type(exc).__name__}") from None
+        self._check_bootstrap_response(response, "browser-session")
         data = response.json()
         if data.get("code") not in (None, "ok") or data.get("enabled") is False:
             raise RuntimeError("browser-session 注册失败")

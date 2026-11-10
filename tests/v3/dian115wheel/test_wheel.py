@@ -144,6 +144,49 @@ class WheelTests(unittest.TestCase):
         self.assertEqual(http.calls[2][2]["headers"]["X-Portal-Browser-Session"], "test-session")
         self.assertEqual(http.calls[2][2]["headers"]["X-Portal-Browser-Proof"], "test-proof")
 
+    def test_bootstrap_http_errors_report_stage_status_without_secrets_or_paid_post(self):
+        class FakeResponse:
+            def __init__(self, status):
+                self.status_code = status
+            def raise_for_status(self):
+                if self.status_code >= 400:
+                    raise ValueError("secret-token-in-exception")
+            def json(self):
+                return {"proof": "test-proof", "ttl": 600}
+        for stage, status in (("challenge", 403), ("session", 429)):
+            with self.subTest(stage=stage):
+                p = Dian115Wheel()
+                p._token = "secret-token-in-exception"
+                calls = []
+                class FakeHTTP:
+                    def get(self, url, **kw):
+                        calls.append("challenge")
+                        return FakeResponse(403 if stage == "challenge" else 200)
+                    def post(self, url, **kw):
+                        calls.append("session")
+                        return FakeResponse(429)
+                    def request(self, *args, **kw):
+                        calls.append("paid")
+                        raise AssertionError("no business request expected")
+                p._http = lambda: FakeHTTP()
+                result = p._run()
+                self.assertEqual(result["code"], 1)
+                self.assertIn(f"browser-{stage}", result["msg"])
+                self.assertIn(f"HTTP {status}", result["msg"])
+                self.assertNotIn("secret-token-in-exception", result["msg"])
+                self.assertNotIn("paid", calls)
+
+    def test_bootstrap_transport_error_does_not_reflect_sensitive_details(self):
+        p = Dian115Wheel()
+        p._token = "secret-token-in-exception"
+        class FakeHTTP:
+            def get(self, url, **kw):
+                raise ValueError("secret-token-in-exception")
+        p._http = lambda: FakeHTTP()
+        result = p._run()
+        self.assertIn("browser-challenge", result["msg"])
+        self.assertNotIn("secret-token-in-exception", result["msg"])
+
     def test_read_only_checks_prevent_spending_below_balance(self):
         p = self.plugin
         p._min_balance = 10
