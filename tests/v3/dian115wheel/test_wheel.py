@@ -121,7 +121,12 @@ class WheelTests(unittest.TestCase):
         self.assertEqual(by_model["max_spins"]["props"]["label"], "自定义次数")
         self.assertEqual(by_model["maximum_spins"]["component"], "VSwitch")
         self.assertEqual(by_model["maximum_spins"]["props"]["label"], "最大次数")
+        self.assertEqual(by_model["wheel_enabled"]["component"], "VSwitch")
+        self.assertEqual(by_model["monopoly_enabled"]["component"], "VSwitch")
+        self.assertTrue(defaults["wheel_enabled"])
+        self.assertFalse(defaults["monopoly_enabled"])
         self.assertFalse(any(f["component"] == "VSelect" for f in fields))
+        self.assertNotIn("spin_mode", by_model)
         self.assertEqual(form[0]["component"], "VForm")
         self.assertEqual(p.get_api()[0]["methods"], ["POST"])
 
@@ -310,7 +315,7 @@ class WheelTests(unittest.TestCase):
         self.assertEqual(len(p._run()["data"]), 3)
         self.assertEqual(calls.count(("POST", p.WHEEL)), 3)
         self.assertEqual(len(p.notices), 1)
-        self.assertEqual(p.notices[0]["title"], "癫影幸运转盘 · 抽奖完成")
+        self.assertEqual(p.notices[0]["title"], "癫影娱乐 · 转盘完成")
         self.assertEqual(p.notices[0]["text"],
                          "🎲 本轮抽奖：3 次  ｜  消耗积分：15\n💰 当前积分：91\n\n"
                          "🎁 奖品结果\n3 积分  ｜  5 积分\n谢谢参与")
@@ -401,6 +406,22 @@ class WheelTests(unittest.TestCase):
         self.assertEqual(len(p._run()["data"]), 2)
         self.assertEqual(calls.count(("POST", p.WHEEL)), 2)
 
+    def test_custom_mode_stops_at_initial_remaining_when_site_count_is_stale(self):
+        p = self.plugin
+        p._spin_mode = "custom"
+        p._max_spins = 5
+        calls = []
+        def fake(method, path, **kw):
+            calls.append((method, path))
+            if path == p.STATUS:
+                return {"items": {"daily_wheel": {"used_today": 18, "max_plays": 20, "cost": 5}}}
+            if path == p.ME:
+                return {"user": {"points": 100}}
+            return {"cost": 5, "prize": {"label": "+3", "points": 3}}
+        p._request = fake
+        self.assertEqual(len(p._run()["data"]), 2)
+        self.assertEqual(calls.count(("POST", p.WHEEL)), 2)
+
     def test_maximum_mode_respects_balance_limit(self):
         p = self.plugin
         p.init_plugin({"token": "test-token", "maximum_spins": True, "max_spins": 1,
@@ -476,6 +497,215 @@ class WheelTests(unittest.TestCase):
         p._request = fake
         self.assertEqual(p._run()["code"], 1)
         self.assertEqual(calls.count(("POST", p.WHEEL)), 1)
+
+
+class MonopolyTests(unittest.TestCase):
+    def setUp(self):
+        self.p = Dian115Wheel()
+        self.p.init_plugin({"token": "test-token", "game": "monopoly", "notify": False})
+        self.calls = []
+
+    def fake(self, method, path, **kwargs):
+        self.calls.append((method, path))
+        if path == self.p.STATUS:
+            return {"items": {"monopoly": {"used_today": 0, "max_plays": 2, "cost": 7},
+                              "daily_wheel": {"used_today": 0, "max_plays": 99, "cost": 1}}}
+        if path == self.p.ME:
+            return {"user": {"points": 20}}
+        if path == self.p.MONOPOLY:
+            return {"award_points": 3, "steps": [{"pos": 1}]}
+        self.fail(f"unexpected endpoint: {path}")
+
+    def test_default_wheel_and_config_reset(self):
+        original = Dian115Wheel()
+        self.assertTrue(original._wheel_enabled)
+        self.assertFalse(original._monopoly_enabled)
+        with patch.object(module.threading, "Thread"):
+            original.init_plugin({"token": "test-token", "game": "monopoly", "onlyonce": True})
+        self.assertFalse(original.saved_config["wheel_enabled"])
+        self.assertTrue(original.saved_config["monopoly_enabled"])
+        original.init_plugin({"token": "test-token", "game": "invalid"})
+        self.assertTrue(original._wheel_enabled)
+        self.assertFalse(original._monopoly_enabled)
+
+    def test_monopoly_spends_only_selected_game_and_records(self):
+        self.p._request = self.fake
+        self.assertEqual(self.p._run()["code"], 0)
+        self.assertEqual(self.calls.count(("POST", self.p.MONOPOLY)), 1)
+        self.assertNotIn(("POST", self.p.WHEEL), self.calls)
+        self.assertEqual(self.p.get_data("wheel_records")[0]["game"], "monopoly")
+        self.assertIsNone(self.p.get_data("monopoly_pending"))
+
+    def test_both_enabled_run_wheel_then_monopoly(self):
+        self.p.init_plugin({"token": "test-token", "wheel_enabled": True, "monopoly_enabled": True, "notify": False})
+        def both(method, path, **kwargs):
+            if path == self.p.WHEEL:
+                self.calls.append((method, path))
+                return {"prize": {"label": "积分", "points": 2}, "cost": 5}
+            return self.fake(method, path, **kwargs)
+        self.p._request = both
+        result = self.p._run()
+        self.assertEqual(result["code"], 0)
+        self.assertEqual([path for method, path in self.calls if method == "POST"], [self.p.WHEEL, self.p.MONOPOLY])
+        self.assertEqual(len(result["data"]), 2)
+
+    def test_no_game_enabled_never_sends_paid_request(self):
+        self.p.init_plugin({"token": "test-token", "wheel_enabled": False, "monopoly_enabled": False, "notify": False})
+        self.p._request = self.fake
+        result = self.p._run()
+        self.assertEqual(result["code"], 1)
+        self.assertEqual(self.calls, [])
+
+    def test_exhausted_wheel_quota_still_checks_monopoly(self):
+        self.p.init_plugin({"token": "test-token", "wheel_enabled": True, "monopoly_enabled": True, "notify": False})
+        def exhausted(method, path, **kwargs):
+            if path == self.p.STATUS:
+                self.calls.append((method, path))
+                return {"items": {"daily_wheel": {"used_today": 2, "max_plays": 2, "cost": 5},
+                                  "monopoly": {"used_today": 0, "max_plays": 1, "cost": 7}}}
+            return self.fake(method, path, **kwargs)
+        self.p._request = exhausted
+        result = self.p._run()
+        self.assertEqual(result["code"], 0)
+        self.assertEqual([path for method, path in self.calls if method == "POST"], [self.p.MONOPOLY])
+
+    def test_missing_wheel_status_stops_before_monopoly(self):
+        self.p.init_plugin({"token": "test-token", "wheel_enabled": True, "monopoly_enabled": True, "notify": False})
+        def no_wheel(method, path, **kwargs):
+            self.calls.append((method, path))
+            return {"items": {"monopoly": {"used_today": 0, "max_plays": 2, "cost": 7}}}
+        self.p._request = no_wheel
+        result = self.p._run()
+        self.assertEqual(result["code"], 1)
+        self.assertEqual(self.calls, [("GET", self.p.STATUS)])
+
+    def test_wheel_failure_stops_before_monopoly(self):
+        self.p.init_plugin({"token": "test-token", "wheel_enabled": True, "monopoly_enabled": True, "notify": False})
+        def ambiguous(method, path, **kwargs):
+            if path == self.p.WHEEL:
+                self.calls.append((method, path))
+                return {"code": "ok"}
+            return self.fake(method, path, **kwargs)
+        self.p._request = ambiguous
+        result = self.p._run()
+        self.assertEqual(result["code"], 1)
+        self.assertEqual([path for method, path in self.calls if method == "POST"], [self.p.WHEEL])
+
+    def test_missing_cost_or_limit_or_balance_fails_closed(self):
+        for field in ("cost", "used_today", "max_plays"):
+            with self.subTest(field=field):
+                self.calls.clear()
+                def missing(method, path, **kw):
+                    self.calls.append((method, path))
+                    return {"items": {"monopoly": {k: v for k, v in {"cost": 7, "used_today": 0, "max_plays": 2}.items() if k != field}}}
+                self.p._request = missing
+                self.assertEqual(self.p._run()["code"], 1)
+                self.assertEqual(self.calls, [("GET", self.p.STATUS)])
+        self.calls.clear()
+        self.p._min_balance = 15
+        self.p._request = self.fake
+        self.assertEqual(self.p._run()["code"], 1)
+        self.assertNotIn(("POST", self.p.MONOPOLY), self.calls)
+
+    def test_ambiguous_response_persists_guard_across_runs(self):
+        self.p._max_spins = 2
+        def ambiguous(method, path, **kw):
+            if method == "POST":
+                self.calls.append((method, path))
+                return {"code": "ok"}
+            return self.fake(method, path, **kw)
+        self.p._request = ambiguous
+        self.assertEqual(self.p._run()["code"], 1)
+        self.assertEqual(self.p.get_data("monopoly_pending"), module.datetime.now().date().isoformat())
+        self.assertEqual(self.p._run()["code"], 1)
+        self.assertEqual(self.calls.count(("POST", self.p.MONOPOLY)), 1)
+
+    def test_transport_error_after_post_keeps_guard_and_never_retries(self):
+        self.p._max_spins = 3
+        def timeout(method, path, **kw):
+            if method == "POST":
+                self.calls.append((method, path))
+                raise TimeoutError("response lost")
+            return self.fake(method, path, **kw)
+        self.p._request = timeout
+        self.assertEqual(self.p._run()["code"], 1)
+        self.assertEqual(self.p._run()["code"], 1)
+        self.assertEqual(self.calls.count(("POST", self.p.MONOPOLY)), 1)
+        self.assertEqual(self.p.get_data("monopoly_pending"), module.datetime.now().date().isoformat())
+
+    def test_maximum_caps_at_initial_quota_despite_stale_counter(self):
+        self.p._spin_mode = "maximum"
+        self.p._max_spins = 1
+        def stale(method, path, **kw):
+            if path == self.p.STATUS:
+                self.calls.append((method, path))
+                return {"items": {"monopoly": {"used_today": 1, "max_plays": 3, "cost": 7}}}
+            return self.fake(method, path, **kw)
+        self.p._request = stale
+        result = self.p._run()
+        self.assertEqual(len(result["data"]), 2)
+        self.assertEqual(self.calls.count(("POST", self.p.MONOPOLY)), 2)
+
+    def test_custom_mode_caps_at_initial_quota_despite_stale_counter(self):
+        self.p._spin_mode = "custom"
+        self.p._max_spins = 5
+        def stale(method, path, **kw):
+            if path == self.p.STATUS:
+                self.calls.append((method, path))
+                return {"items": {"monopoly": {"used_today": 1, "max_plays": 3, "cost": 7}}}
+            return self.fake(method, path, **kw)
+        self.p._request = stale
+        result = self.p._run()
+        self.assertEqual(len(result["data"]), 2)
+        self.assertEqual(self.calls.count(("POST", self.p.MONOPOLY)), 2)
+
+    def test_persistence_failure_never_sends_paid_post(self):
+        self.p._request = self.fake
+        self.p.save_data = lambda key, value: None
+        self.assertEqual(self.p._run()["code"], 1)
+        self.assertNotIn(("POST", self.p.MONOPOLY), self.calls)
+
+    def test_negative_award_is_recorded_not_misclassified_as_failure(self):
+        def negative(method, path, **kw):
+            if path == self.p.MONOPOLY:
+                self.calls.append((method, path))
+                return {"award_points": -2, "steps": [{"pos": 3}]}
+            return self.fake(method, path, **kw)
+        self.p._request = negative
+        self.assertEqual(self.p._run()["code"], 0)
+        self.assertEqual(self.p.get_data("wheel_records")[0]["points"], -2)
+        self.assertIsNone(self.p.get_data("monopoly_pending"))
+
+    def test_record_storage_failure_keeps_guard_and_stops_next_run(self):
+        self.p._request = self.fake
+        original = self.p.save_data
+        def fail_record(key, value):
+            if key != "wheel_records":
+                original(key, value)
+        self.p.save_data = fail_record
+        self.assertEqual(self.p._run()["code"], 1)
+        self.assertEqual(self.p._run()["code"], 1)
+        self.assertEqual(self.calls.count(("POST", self.p.MONOPOLY)), 1)
+        self.assertEqual(self.p.get_data("monopoly_pending"), module.datetime.now().date().isoformat())
+
+    def test_missing_monopoly_status_never_falls_back_to_wheel(self):
+        self.p._request = lambda method, path, **kw: {"items": {"daily_wheel": {"used_today": 0, "max_plays": 10, "cost": 5}}}
+        response = self.p._run()
+        self.assertEqual(response["code"], 1)
+        self.assertIn("未返回大富翁状态", response["msg"])
+        self.assertIsNone(self.p.get_data("monopoly_pending"))
+
+    def test_notification_reads_final_balance(self):
+        self.p._notify = True
+        def fake(method, path, **kw):
+            if path == self.p.ME and ("POST", self.p.MONOPOLY) in self.calls:
+                self.calls.append((method, path))
+                return {"user": {"points": 16}}
+            return self.fake(method, path, **kw)
+        self.p._request = fake
+        self.p._run()
+        self.assertIn("当前积分：16", self.p.notices[0]["text"])
+        self.assertIn("大富翁奖励 3 积分", self.p.notices[0]["text"])
 
 
 if __name__ == "__main__":

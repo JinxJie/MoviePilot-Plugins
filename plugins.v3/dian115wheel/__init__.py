@@ -1,4 +1,4 @@
-"""癫影幸运转盘 — MoviePilot V3 原生插件。仅在用户明确开启后抽奖。"""
+"""癫影娱乐 — MoviePilot V3 原生插件。仅在用户明确开启后游玩。"""
 import base64
 import os
 import threading
@@ -22,10 +22,10 @@ except ImportError:
 
 
 class Dian115Wheel(_PluginBase):
-    plugin_name = "癫影幸运转盘"
-    plugin_desc = "癫影每日幸运转盘：可选定时抽奖、次数与余额限制、中奖记录及通知。每次抽奖会消耗站点积分。"
-    plugin_icon = "https://raw.githubusercontent.com/JinxJie/MoviePilot-Plugins/main/icons/dian115wheel.png"
-    plugin_version = "3.0.2"
+    plugin_name = "癫影娱乐"
+    plugin_desc = "癫影幸运转盘与幸运大富翁：独立开关，依次运行，支持次数、余额限制、记录及通知；游玩消耗积分。"
+    plugin_icon = "https://raw.githubusercontent.com/JinxJie/MoviePilot-Plugins/main/icons/dian115entertainment.png"
+    plugin_version = "3.1.0"
     plugin_author = "JinxJie"
     author_url = "https://github.com/JinxJie"
     plugin_config_prefix = "dian115wheel_"
@@ -34,6 +34,7 @@ class Dian115Wheel(_PluginBase):
     BASE = "https://m.dian115.com"
     API = "/api/portal"
     WHEEL = API + "/lottery/wheel"
+    MONOPOLY = API + "/games/monopoly/play"
     STATUS = API + "/games/status"
     ME = API + "/me"
 
@@ -43,6 +44,8 @@ class Dian115Wheel(_PluginBase):
         self._token = ""
         self._cron = "0 10 * * *"
         self._spin_mode = "custom"
+        self._wheel_enabled = True
+        self._monopoly_enabled = False
         self._maximum_spins = False
         self._max_spins = 1
         self._min_balance = 5
@@ -67,6 +70,10 @@ class Dian115Wheel(_PluginBase):
         # 兼容旧版 spin_mode；新配置以最大次数开关为准。
         self._maximum_spins = bool(config.get("maximum_spins", config.get("spin_mode") == "maximum"))
         self._spin_mode = "maximum" if self._maximum_spins else "custom"
+        # 旧 game=monopoly 配置继续仅运行大富翁；缺少新字段的原用户保持转盘开启。
+        old_game = config.get("game", "wheel")
+        self._wheel_enabled = bool(config.get("wheel_enabled", old_game != "monopoly"))
+        self._monopoly_enabled = bool(config.get("monopoly_enabled", old_game == "monopoly"))
         self._max_spins = max(1, min(100, int(config.get("max_spins") if config.get("max_spins") is not None else 1)))
         self._min_balance = max(0, int(config.get("min_balance") if config.get("min_balance") is not None else 5))
         self._notify = bool(config.get("notify", True))
@@ -74,6 +81,7 @@ class Dian115Wheel(_PluginBase):
         self._proxy = str(config.get("proxy") or "").strip()
         if config.get("onlyonce"):
             self.update_config({"enabled": self._enabled, "token": self._token, "cron": self._cron,
+                                "wheel_enabled": self._wheel_enabled, "monopoly_enabled": self._monopoly_enabled,
                                 "spin_mode": self._spin_mode, "maximum_spins": self._maximum_spins,
                                 "max_spins": self._max_spins, "min_balance": self._min_balance,
                                 "notify": self._notify, "use_system_proxy": self._use_system_proxy,
@@ -254,20 +262,39 @@ class Dian115Wheel(_PluginBase):
     def _run_locked(self):
         if not self._token:
             return {"code": 1, "msg": "请先填写登录 Token"}
+        if not self._wheel_enabled and not self._monopoly_enabled:
+            return {"code": 1, "msg": "请先开启幸运转盘或幸运大富翁"}
+        if self._wheel_enabled:
+            wheel = self._run_wheel()
+            if not self._monopoly_enabled or wheel.get("unsafe_stop"):
+                return wheel
+        else:
+            wheel = None
+        monopoly = self._run_monopoly()
+        if wheel is None:
+            return monopoly
+        return {"code": 0 if wheel["data"] or monopoly["data"] else 1,
+                "msg": f"转盘：{wheel['msg']}；大富翁：{monopoly['msg']}",
+                "data": wheel["data"] + monopoly["data"]}
+
+    def _run_wheel(self):
         results = []
         error = ""
+        unsafe_stop = False
         initial_remaining = None
         try:
             # 最大次数模式逐次读取站点限额；首次额度也作为本轮上限，防止站点计数暂未更新时超抽。
             for _ in range(self._max_spins if self._spin_mode == "custom" else 100):
                 status = self._request("GET", self.STATUS)
                 wheel = (status.get("items") or {}).get("daily_wheel") or {}
-                used, maximum = int(wheel.get("used_today") or 0), int(wheel.get("max_plays") or 0)
-                if self._spin_mode == "maximum":
-                    if initial_remaining is None:
-                        initial_remaining = max(0, maximum - used)
-                    if len(results) >= initial_remaining:
-                        break
+                if not isinstance(wheel, dict) or any(key not in wheel for key in ("used_today", "max_plays")):
+                    raise RuntimeError("站点未返回完整转盘额度，已停止以保护积分")
+                used = self._nonnegative_int(wheel["used_today"], "转盘已用次数")
+                maximum = self._nonnegative_int(wheel["max_plays"], "转盘每日额度")
+                if initial_remaining is None:
+                    initial_remaining = max(0, maximum - used)
+                if len(results) >= initial_remaining:
+                    break
                 raw_cost = wheel.get("cost")
                 if isinstance(raw_cost, bool) or raw_cost is None or int(raw_cost) < 0:
                     raise RuntimeError("站点未提供有效的单次抽奖消耗，已停止以保护积分")
@@ -292,6 +319,7 @@ class Dian115Wheel(_PluginBase):
                 self.save_data("wheel_records", (self._records() + [row])[-500:])
         except Exception as exc:
             # 不记录请求头/Token/返回体，避免凭据泄露。
+            unsafe_stop = True
             error = str(exc)[:200] if isinstance(exc, RuntimeError) else type(exc).__name__
             logger.warning(f"癫影转盘执行中断：{error}")
         if results and self._notify:
@@ -301,16 +329,107 @@ class Dian115Wheel(_PluginBase):
                 balance = None
                 logger.warning("癫影转盘通知读取当前积分失败")
             try:
-                self.post_message(mtype=NotificationType.Plugin, title="癫影幸运转盘 · 抽奖完成",
+                self.post_message(mtype=NotificationType.Plugin, title="癫影娱乐 · 转盘完成",
                                   text=self._notification_text(results, balance, error))
             except Exception:
                 logger.warning("癫影转盘通知发送失败")
+        return {"code": 0 if results else 1, "msg": f"完成 {len(results)} 次" + (f"；{error}" if error else ""), "data": results,
+                "unsafe_stop": unsafe_stop}
+
+    @staticmethod
+    def _nonnegative_int(value, name):
+        if isinstance(value, bool) or not isinstance(value, (int, str)):
+            raise RuntimeError(f"大富翁{name}无效，已停止以保护积分")
+        try:
+            number = int(value)
+        except ValueError:
+            raise RuntimeError(f"大富翁{name}无效，已停止以保护积分") from None
+        if number < 0:
+            raise RuntimeError(f"大富翁{name}无效，已停止以保护积分")
+        return number
+
+    @staticmethod
+    def _award_int(value):
+        # 大富翁格子可能是扣分（站点账本用有符号奖励）；仅额度/成本必须非负。
+        if isinstance(value, bool) or not isinstance(value, (int, str)):
+            raise RuntimeError("大富翁奖励积分无效；请在站点核对，勿重试")
+        try:
+            return int(value)
+        except ValueError:
+            raise RuntimeError("大富翁奖励积分无效；请在站点核对，勿重试") from None
+
+    def _monopoly_pending(self):
+        return self.get_data("monopoly_pending") == datetime.now().date().isoformat()
+
+    def _run_monopoly(self):
+        """独立玩法；只信任站点状态的额度和成本，不重发不确定的消费请求。"""
+        if not self._token:
+            return {"code": 1, "msg": "请先填写登录 Token"}
+        results, error, initial_remaining = [], "", None
+        try:
+            if self._monopoly_pending():
+                raise RuntimeError("先前大富翁结果待核对；请在站点核对今日次数和积分，今日不再自动游玩")
+            for _ in range(self._max_spins if self._spin_mode == "custom" else 100):
+                if self._monopoly_pending():
+                    raise RuntimeError("大富翁结果仍待核对；今日不再自动游玩")
+                status = self._request("GET", self.STATUS)
+                items = status.get("items")
+                game = items.get("monopoly") if isinstance(items, dict) else None
+                if not isinstance(game, dict):
+                    raise RuntimeError("站点未返回大富翁状态，已停止以保护积分")
+                used = self._nonnegative_int(game.get("used_today"), "已用次数")
+                maximum = self._nonnegative_int(game.get("max_plays"), "每日额度")
+                cost = self._nonnegative_int(game.get("cost"), "单次消耗")
+                if initial_remaining is None:
+                    initial_remaining = max(0, maximum - used)
+                if len(results) >= initial_remaining:
+                    break
+                if used >= maximum:
+                    error = "今日大富翁次数已用完或站点未开放"
+                    break
+                points = self._current_points()
+                if points - cost < self._min_balance:
+                    error = f"积分不足：余额 {points}，单次消耗 {cost}，需保留 {self._min_balance}"
+                    break
+                # POST 前落盘；若请求结果未知，重启后也不可再次消费。
+                today = datetime.now().date().isoformat()
+                self.save_data("monopoly_pending", today)
+                if not self._monopoly_pending():
+                    raise RuntimeError("无法保存大富翁待核对标记，未发送游玩请求")
+                result = self._request("POST", self.MONOPOLY, retry=False)
+                award = self._award_int(result.get("award_points"))
+                steps = result.get("steps")
+                if not isinstance(steps, list) or not steps:
+                    raise RuntimeError("大富翁请求已发送但结果不明确；请在站点核对，勿重试")
+                # 站点前端用 award_points 和 steps 展示结果；不把前端默认格子当成服务端结果。
+                row = {"date": datetime.now().isoformat(timespec="seconds"), "game": "monopoly",
+                       "cost": cost, "label": f"大富翁奖励 {award} 积分", "points": award, "vip_days": 0}
+                self.save_data("wheel_records", (self._records() + [row])[-500:])
+                if row not in self._records():
+                    raise RuntimeError("大富翁结果未能持久保存；请在站点核对，勿重试")
+                results.append(row)
+                self.save_data("monopoly_pending", None)
+                if self.get_data("monopoly_pending") is not None:
+                    raise RuntimeError("大富翁记录已保存但待核对标记未清除；请核对站点后再运行")
+        except Exception as exc:
+            error = str(exc)[:200] if isinstance(exc, RuntimeError) else type(exc).__name__
+            logger.warning(f"癫影大富翁执行中断：{error}")
+        if results and self._notify:
+            try:
+                balance = self._current_points()
+            except Exception:
+                balance = None
+            try:
+                self.post_message(mtype=NotificationType.Plugin, title="癫影娱乐 · 大富翁完成",
+                                  text=self._notification_text(results, balance, error).replace("本轮抽奖", "本轮游玩"))
+            except Exception:
+                logger.warning("癫影大富翁通知发送失败")
         return {"code": 0 if results else 1, "msg": f"完成 {len(results)} 次" + (f"；{error}" if error else ""), "data": results}
 
     def get_service(self) -> List[Dict[str, Any]]:
         if not self._enabled or not self._token:
             return []
-        return [{"id": "Dian115Wheel", "name": "癫影幸运转盘", "trigger": CronTrigger.from_crontab(self._cron),
+        return [{"id": "Dian115Wheel", "name": "癫影娱乐", "trigger": CronTrigger.from_crontab(self._cron),
                  "func": self._run, "kwargs": {}}]
 
     def get_api(self) -> List[Dict[str, Any]]:
@@ -332,6 +451,8 @@ class Dian115Wheel(_PluginBase):
             field("VSwitch", "enabled", "启用定时抽奖"),
             field("VTextField", "token", "癫影 __Host-portal_token", type="password", hint="登录 m.dian115.com 后从浏览器 Cookie 复制；不与签到插件共享登录状态", persistent_hint=True),
             field("VTextField", "cron", "Cron（默认每天 10:00）"),
+            field("VSwitch", "wheel_enabled", "运行幸运大转盘", hint="默认开启；与大富翁同时开启时先执行转盘", persistent_hint=True),
+            field("VSwitch", "monopoly_enabled", "运行幸运大富翁", hint="默认关闭；与转盘同时开启时排在转盘之后", persistent_hint=True),
             field("VTextField", "max_spins", "自定义次数", type="number", min="1", max="100", hint="最大次数关闭时，每轮按此次数抽奖（默认 1 次）", persistent_hint=True),
             field("VSwitch", "maximum_spins", "最大次数", hint="开启时改为按站点今日剩余额度抽奖，忽略自定义次数；仍受积分保留限制", persistent_hint=True),
             field("VTextField", "min_balance", "抽奖后至少保留积分", type="number", min="0"),
@@ -339,9 +460,9 @@ class Dian115Wheel(_PluginBase):
             field("VSwitch", "use_system_proxy", "使用系统代理（默认开启）"),
             field("VTextField", "proxy", "自定义代理（关闭系统代理时生效）"),
             field("VSwitch", "onlyonce", "保存后立即运行一次（消耗积分）"),
-            {"component": "VAlert", "props": {"type": "warning", "variant": "tonal", "text": "抽奖会消耗积分；最大次数开启时按站点今日剩余额度执行，逐次检查积分与限额；抽奖 POST 不自动重试。"}},
+            {"component": "VAlert", "props": {"type": "warning", "variant": "tonal", "text": "两种玩法均会消耗积分；分别开启时按转盘→大富翁执行，转盘结果不明则停止，避免继续扣分；最大次数按各玩法当日剩余额度执行，逐次检查积分与限额。"}},
         ]}]
-        return form, {"enabled": False, "token": "", "cron": "0 10 * * *", "maximum_spins": False, "max_spins": 1,
+        return form, {"enabled": False, "token": "", "cron": "0 10 * * *", "wheel_enabled": True, "monopoly_enabled": False, "maximum_spins": False, "max_spins": 1,
                       "min_balance": 5, "notify": True, "use_system_proxy": True, "proxy": "", "onlyonce": False}
 
     def get_page(self):
@@ -367,7 +488,7 @@ class Dian115Wheel(_PluginBase):
                 for k in ("date", "label", "cost", "points", "vip_days")]} for r in records]
         return [{"component": "VRow", "content": [balance_card]},
                 {"component": "VRow", "content": cards}, {"component": "VCard", "props": {"class": "mt-3"}, "content": [
-            {"component": "VCardTitle", "text": "最近抽奖记录（站点结果，以本地记录为准）"},
+            {"component": "VCardTitle", "text": "最近游玩记录（以本地记录为准）"},
             {"component": "VCardText", "props": {"style": "overflow-x:auto"}, "content": [
                 {"component": "VTable", "props": {"style": "min-width:540px"}, "content": [
                     {"component": "thead", "content": [{"component": "tr", "content":

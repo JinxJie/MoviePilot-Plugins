@@ -14,16 +14,17 @@
     }
   },
   "Dian115Wheel": {
-    "name": "癫影幸运转盘（V3）",
-    "description": "癫影每日幸运转盘，支持定时运行、抽奖次数及最低保留积分限制、实时积分展示、双列奖品结果与通知。每次抽奖消耗站点积分。",
-    "labels": "癫影,幸运转盘,抽奖,自动化",
-    "version": "3.0.2",
-    "icon": "https://raw.githubusercontent.com/JinxJie/MoviePilot-Plugins/main/icons/dian115wheel.png",
+    "name": "癫影娱乐（V3）",
+    "description": "癫影幸运转盘与幸运大富翁分别启用、按序游玩；支持定时运行、次数及最低保留积分限制、实时积分、结果记录与通知。游玩消耗站点积分。",
+    "labels": "癫影,幸运转盘,大富翁,抽奖,自动化",
+    "version": "3.1.0",
+    "icon": "https://raw.githubusercontent.com/JinxJie/MoviePilot-Plugins/main/icons/dian115entertainment.png",
     "author": "JinxJie",
     "level": 2,
     "release": false,
     "system_version": ">=3.0.0",
     "history": {
+      "v3.1.0": "更名癫影娱乐并启用新图标；新增幸运大富翁独立开关，双开时先转盘后大富翁；加入积分、额度与消费结果待核对保护。",
       "v3.0.2": "兼容 MoviePilot V3 字典形式的系统代理，修复转盘请求未使用系统代理的问题。",
       "v3.0.1": "首页实时显示站点积分；抽奖通知展示结束时积分，奖品每行两个，并保留提前结束原因。",
       "v3.0.0": "V3 原生插件版本统一从 3.0.0 起；支持定时与手动转盘、每日次数及积分护栏、记录和通知。",

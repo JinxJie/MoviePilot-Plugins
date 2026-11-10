@@ -181,6 +181,20 @@ def test_checker_rejects_v3_patch_bump_and_unsorted_history(tmp_path: Path) -> N
     assert "V3 版本应与旧代 2.6.1 保持大版本跃迁" in result.stdout
 
 
+def test_checker_accepts_native_v3_major_after_legacy_v1(tmp_path: Path) -> None:
+    """原生 V3 的 3.x 版本不应被旧 V2 1.x 的过渡规则误拒。"""
+    repo = tmp_path / "repo"
+    _write_fixture(repo, package_version="1.0.3", source_version="1.0.3")
+    plugin_dir = repo / "plugins.v3/example"
+    plugin_dir.mkdir(parents=True)
+    (plugin_dir / "__init__.py").write_text("class Example:\n    plugin_version = '3.1.0'\n", encoding="utf-8")
+    (repo / "package.v3.json").write_text(
+        json.dumps({"Example": {"version": "3.1.0", "history": {"v3.1.0": "首发"}}}), encoding="utf-8"
+    )
+    result = _run_checker(repo, "package.v3.json")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_pre_push_propagates_version_gate_failure(tmp_path: Path) -> None:
     """pre-push 必须传播 checker 非零状态，确保 git push 在上传前被拒绝。"""
     _write_fixture(tmp_path, package_version="2.0.0", source_version="1.0.0")

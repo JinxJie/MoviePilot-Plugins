@@ -119,7 +119,12 @@ def _check_v3_release_contract(path: Path, plugin_id: str, meta: dict) -> list[s
     legacy_version = _semantic_version(legacy_meta.get("version")) if isinstance(legacy_meta, dict) else None
     if parsed_version and legacy_version:
         expected_major = legacy_version[0] + 1
-        if parsed_version[0] != expected_major:
+        # V2 1.x 对应的过渡版 V3 2.x 仍有效；V3 原生实现统一采用 3.x。
+        # 不放松旧代 2.x -> V3 3.x 的跃迁校验。
+        allowed_majors = {expected_major}
+        if expected_major == 2:
+            allowed_majors.add(3)
+        if parsed_version[0] not in allowed_majors:
             errors.append(
                 f"{path}: {plugin_id} V3 版本应与旧代 {legacy_meta.get('version')} 保持大版本跃迁"
                 f"（主版本 {expected_major}.x），当前为 {package_version}"
