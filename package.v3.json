@@ -34,14 +34,14 @@
     "name": "癫影自动签到（V3）",
     "description": "癫影每日签到，支持普通签/运气签与默认关闭的签到后最大抽奖；兼容 V3 系统代理，展示实时积分及合并通知。",
     "labels": "签到,自动化,积分,转盘",
-    "version": "2.0.0",
+    "version": "3.0.0",
     "icon": "https://raw.githubusercontent.com/JinxJie/MoviePilot-Plugins/main/icons/dian115sign.png",
     "author": "JinxJie",
     "level": 2,
     "release": false,
     "system_version": ">=3.0.0",
     "history": {
-      "v2.0.0": "新增 V3 原生实现，兼容字典或对象型系统代理；保留普通签、运气签与默认关闭的签到后最大抽奖，修复签到签名格式并增加付费请求保护。"
+      "v3.0.0": "新增 V3 原生实现，兼容字典或对象型系统代理；保留普通签、运气签与默认关闭的签到后最大抽奖，修复签到签名格式并增加付费请求保护。"
     }
   }
 }

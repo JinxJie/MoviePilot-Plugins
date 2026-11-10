@@ -62,7 +62,7 @@ def test_native_lifecycle_and_existing_form():
     with patch.dict(sys.modules, {**mod._test_modules, mod.__name__: mod}):
         form, defaults = plugin.get_form()
     assert form and defaults["maximum_wheel"] is False
-    assert plugin.plugin_version == "2.0.0"
+    assert plugin.plugin_version == "3.0.0"
     assert plugin.get_state() is False
     assert plugin.get_service() == []
     assert plugin.get_command()[0]["event"] == "plugin"
