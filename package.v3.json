@@ -17,12 +17,15 @@
     "name": "癫影幸运转盘（V3）",
     "description": "癫影每日幸运转盘，支持定时运行、抽奖次数及最低保留积分限制、结果记录与通知。每次抽奖消耗站点积分。",
     "labels": "癫影,幸运转盘,抽奖,自动化",
-    "version": "1.0.0",
+    "version": "3.0.0",
     "icon": "https://raw.githubusercontent.com/JinxJie/MoviePilot-Plugins/main/icons/dian115sign.png",
     "author": "JinxJie",
     "level": 2,
     "release": false,
     "system_version": ">=3.0.0",
-    "history": {"v1.0.0": "首个 V3 原生版本：定时与手动转盘、每日次数及积分护栏、记录和通知。"}
+    "history": {
+      "v3.0.0": "V3 原生插件版本统一从 3.0.0 起；支持定时与手动转盘、每日次数及积分护栏、记录和通知。",
+      "v1.0.0": "首个 V3 原生版本：定时与手动转盘、每日次数及积分护栏、记录和通知。"
+    }
   }
 }

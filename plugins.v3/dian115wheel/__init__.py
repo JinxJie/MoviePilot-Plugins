@@ -25,7 +25,7 @@ class Dian115Wheel(_PluginBase):
     plugin_name = "癫影幸运转盘"
     plugin_desc = "癫影每日幸运转盘：可选定时抽奖、次数与余额限制、中奖记录及通知。每次抽奖会消耗站点积分。"
     plugin_icon = "https://raw.githubusercontent.com/JinxJie/MoviePilot-Plugins/main/icons/dian115sign.png"
-    plugin_version = "1.0.0"
+    plugin_version = "3.0.0"
     plugin_author = "JinxJie"
     author_url = "https://github.com/JinxJie"
     plugin_config_prefix = "dian115wheel_"

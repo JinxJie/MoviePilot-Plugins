@@ -12,7 +12,7 @@ JinxJie 的 [MoviePilot](https://github.com/jxxghp/MoviePilot) 第三方插件�
 | NodeSeek 自动签到 | [`plugins.v2/nodeseek`](plugins.v2/nodeseek) | 1.0.2 | NodeSeek 论坛每日自动签到、鸡腿收益统计、消息通知 |
 | 插件残留清理 | [`plugins.v2/pluginresidueclean`](plugins.v2/pluginresidueclean) | 1.0.1 | 风险分级、单项清理、清理后复扫、定时扫描通知，默认不自动删除 |
 | 癫影自动签到 | [`plugins.v2/dian115sign`](plugins.v2/dian115sign) | 1.0.2 | 癫影每日自动签到、普通签/运气签开关、积分与连续签到统计、结果通知 |
-| 癫影幸运转盘（V3） | [`plugins.v3/dian115wheel`](plugins.v3/dian115wheel) | 1.0.0 | 每日转盘、次数和积分保留限制、记录与通知（消耗积分） |
+| 癫影幸运转盘（V3） | [`plugins.v3/dian115wheel`](plugins.v3/dian115wheel) | 3.0.0 | 每日转盘、次数和积分保留限制、记录与通知（消耗积分） |
 
 ## 📖 使用说明
 
@@ -194,7 +194,7 @@ NodeSeek 论坛每日自动签到，使用 curl_cffi 模拟 Chrome 浏览器指�
 <details>
 <summary>5. 🎡 癫影幸运转盘（Dian115Wheel · V3）</summary>
 
-**v1.0.0 · 站点自动化 · 癫影（m.dian115.com）**
+**v3.0.0 · 站点自动化 · 癫影（m.dian115.com）**
 
 **功能：**
 通过癫影站点每日转盘接口运行手动或 Cron 定时抽奖，记录积分消耗、奖励及 VIP 天数。
@@ -218,6 +218,7 @@ NodeSeek 论坛每日自动签到，使用 curl_cffi 模拟 Chrome 浏览器指�
 抽奖存在积分消耗和随机结果；站点规则、接口及成本可能变动。请自行评估，插件不保证中奖，也不代替站点风控规则。
 
 **更新说明：**
+- v3.0.0：V3 原生插件版本统一从 3.0.0 起；支持定时和手动转盘、积分护栏、结果记录与通知。
 - v1.0.0：首版 V3 原生实现，支持定时和手动转盘、积分护栏、结果记录与通知。
 
 </details>
