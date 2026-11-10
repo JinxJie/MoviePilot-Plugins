@@ -283,7 +283,13 @@ class Dian115Wheel(_PluginBase):
         unsafe_stop = False
         initial_remaining = None
         try:
-            # 最大次数模式逐次读取站点限额；首次额度也作为本轮上限，防止站点计数暂未更新时超抽。
+            if self.get_data("wheel_pending") == datetime.now().date().isoformat():
+                raise RuntimeError("先前转盘结果待核对；请在站点核对今日次数和积分，今日不再自动抽奖")
+            today = datetime.now().date().isoformat()
+            progress = self.get_data("wheel_progress")
+            if not isinstance(progress, dict) or progress.get("date") != today:
+                progress = None
+            # 每次读取站点限额，并用本地已完成次数兜底防止滞后计数。
             for _ in range(self._max_spins if self._spin_mode == "custom" else 100):
                 status = self._request("GET", self.STATUS)
                 wheel = (status.get("items") or {}).get("daily_wheel") or {}
@@ -291,6 +297,10 @@ class Dian115Wheel(_PluginBase):
                     raise RuntimeError("站点未返回完整转盘额度，已停止以保护积分")
                 used = self._nonnegative_int(wheel["used_today"], "转盘已用次数")
                 maximum = self._nonnegative_int(wheel["max_plays"], "转盘每日额度")
+                if progress is not None:
+                    baseline = self._nonnegative_int(progress.get("baseline"), "转盘本地基准次数")
+                    count = self._nonnegative_int(progress.get("count"), "转盘本地已抽次数")
+                    used = max(used, baseline + count)
                 if initial_remaining is None:
                     initial_remaining = max(0, maximum - used)
                 if len(results) >= initial_remaining:
@@ -307,7 +317,11 @@ class Dian115Wheel(_PluginBase):
                 if points - cost < self._min_balance:
                     error = f"积分不足：余额 {points}，单次消耗 {cost}，需保留 {self._min_balance}"
                     break
-                # 仅此接口会消费积分；不得在 HTTP 失败后自动重试，避免重复抽奖。
+                # 请求前写入并读回待核对标记；结果未知时禁止后续轮次再次消费。
+                today = datetime.now().date().isoformat()
+                self.save_data("wheel_pending", today)
+                if self.get_data("wheel_pending") != today:
+                    raise RuntimeError("无法保存转盘待核对标记，未发送抽奖请求")
                 result = self._request("POST", self.WHEEL, retry=False)
                 prize = result.get("prize")
                 if not isinstance(prize, dict) or not any(key in prize for key in ("label", "points", "vip_days")):
@@ -315,8 +329,19 @@ class Dian115Wheel(_PluginBase):
                 row = {"date": datetime.now().isoformat(timespec="seconds"), "cost": int(result.get("cost") if result.get("cost") is not None else cost),
                        "label": str(prize.get("label") or "未知"), "points": int(prize.get("points") or 0),
                        "vip_days": int(prize.get("vip_days") or 0)}
-                results.append(row)
                 self.save_data("wheel_records", (self._records() + [row])[-500:])
+                if row not in self._records():
+                    raise RuntimeError("转盘结果未能持久保存；请在站点核对，勿重试")
+                if progress is None:
+                    progress = {"date": today, "baseline": used, "count": 0}
+                progress = {**progress, "count": self._nonnegative_int(progress["count"], "转盘本地已抽次数") + 1}
+                self.save_data("wheel_progress", progress)
+                if self.get_data("wheel_progress") != progress:
+                    raise RuntimeError("转盘额度记录未能持久保存；请在站点核对，勿重试")
+                results.append(row)
+                self.save_data("wheel_pending", None)
+                if self.get_data("wheel_pending") is not None:
+                    raise RuntimeError("转盘待核对标记未清除；请核对站点后再运行")
         except Exception as exc:
             # 不记录请求头/Token/返回体，避免凭据泄露。
             unsafe_stop = True
@@ -369,6 +394,10 @@ class Dian115Wheel(_PluginBase):
         try:
             if self._monopoly_pending():
                 raise RuntimeError("先前大富翁结果待核对；请在站点核对今日次数和积分，今日不再自动游玩")
+            today = datetime.now().date().isoformat()
+            progress = self.get_data("monopoly_progress")
+            if not isinstance(progress, dict) or progress.get("date") != today:
+                progress = None
             for _ in range(self._max_spins if self._spin_mode == "custom" else 100):
                 if self._monopoly_pending():
                     raise RuntimeError("大富翁结果仍待核对；今日不再自动游玩")
@@ -380,6 +409,10 @@ class Dian115Wheel(_PluginBase):
                 used = self._nonnegative_int(game.get("used_today"), "已用次数")
                 maximum = self._nonnegative_int(game.get("max_plays"), "每日额度")
                 cost = self._nonnegative_int(game.get("cost"), "单次消耗")
+                if progress is not None:
+                    baseline = self._nonnegative_int(progress.get("baseline"), "本地基准次数")
+                    count = self._nonnegative_int(progress.get("count"), "本地已玩次数")
+                    used = max(used, baseline + count)
                 if initial_remaining is None:
                     initial_remaining = max(0, maximum - used)
                 if len(results) >= initial_remaining:
@@ -407,6 +440,12 @@ class Dian115Wheel(_PluginBase):
                 self.save_data("wheel_records", (self._records() + [row])[-500:])
                 if row not in self._records():
                     raise RuntimeError("大富翁结果未能持久保存；请在站点核对，勿重试")
+                if progress is None:
+                    progress = {"date": today, "baseline": used, "count": 0}
+                progress = {**progress, "count": self._nonnegative_int(progress["count"], "本地已玩次数") + 1}
+                self.save_data("monopoly_progress", progress)
+                if self.get_data("monopoly_progress") != progress:
+                    raise RuntimeError("大富翁额度记录未能持久保存；请在站点核对，勿重试")
                 results.append(row)
                 self.save_data("monopoly_pending", None)
                 if self.get_data("monopoly_pending") is not None:

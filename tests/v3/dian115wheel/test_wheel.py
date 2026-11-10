@@ -465,6 +465,99 @@ class WheelTests(unittest.TestCase):
         self.assertEqual(p._run()["code"], 1)
         self.assertEqual(calls, [("GET", p.STATUS)])
 
+    def test_stale_wheel_quota_across_runs_does_not_exceed_daily_limit(self):
+        p = self.plugin
+        calls = []
+        def fake(method, path, **kw):
+            calls.append((method, path))
+            if path == p.STATUS:
+                return {"items": {"daily_wheel": {"used_today": 0, "max_plays": 1, "cost": 5}}}
+            if path == p.ME:
+                return {"user": {"points": 100}}
+            return {"cost": 5, "prize": {"label": "+3", "points": 3}}
+        p._request = fake
+        self.assertEqual(p._run()["code"], 0)
+        self.assertEqual(p._run()["code"], 1)
+        restarted = Dian115Wheel()
+        restarted.data = p.data
+        restarted._token = p._token
+        restarted._notify = False
+        restarted._request = fake
+        self.assertEqual(restarted._run()["code"], 1)
+        self.assertEqual(calls.count(("POST", p.WHEEL)), 1)
+
+    def test_wheel_pending_storage_failure_never_spends(self):
+        p = self.plugin
+        calls = []
+        def fake(method, path, **kw):
+            calls.append((method, path))
+            if path == p.STATUS:
+                return {"items": {"daily_wheel": {"used_today": 0, "max_plays": 2, "cost": 5}}}
+            if path == p.ME:
+                return {"user": {"points": 100}}
+            self.fail("pending write failure must prevent POST")
+        p._request = fake
+        p.save_data = lambda key, value: None
+        self.assertEqual(p._run()["code"], 1)
+        self.assertNotIn(("POST", p.WHEEL), calls)
+
+    def test_wheel_record_failure_keeps_pending_guard(self):
+        p = self.plugin
+        calls = []
+        def fake(method, path, **kw):
+            calls.append((method, path))
+            if path == p.STATUS:
+                return {"items": {"daily_wheel": {"used_today": 0, "max_plays": 2, "cost": 5}}}
+            if path == p.ME:
+                return {"user": {"points": 100}}
+            return {"cost": 5, "prize": {"label": "+3", "points": 3}}
+        p._request = fake
+        original = p.save_data
+        p.save_data = lambda key, value: original(key, value) if key != "wheel_records" else None
+        self.assertEqual(p._run()["code"], 1)
+        self.assertEqual(p._run()["code"], 1)
+        self.assertEqual(calls.count(("POST", p.WHEEL)), 1)
+        self.assertEqual(p.get_data("wheel_pending"), module.datetime.now().date().isoformat())
+
+    def test_wheel_progress_failure_keeps_pending_guard(self):
+        p = self.plugin
+        calls = []
+        def fake(method, path, **kw):
+            calls.append((method, path))
+            if path == p.STATUS:
+                return {"items": {"daily_wheel": {"used_today": 0, "max_plays": 2, "cost": 5}}}
+            if path == p.ME:
+                return {"user": {"points": 100}}
+            return {"cost": 5, "prize": {"label": "+3", "points": 3}}
+        p._request = fake
+        original = p.save_data
+        p.save_data = lambda key, value: original(key, value) if key != "wheel_progress" else None
+        self.assertEqual(p._run()["code"], 1)
+        self.assertEqual(p._run()["code"], 1)
+        self.assertEqual(calls.count(("POST", p.WHEEL)), 1)
+        self.assertEqual(p.get_data("wheel_pending"), module.datetime.now().date().isoformat())
+
+    def test_ambiguous_wheel_response_blocks_later_run_and_restart(self):
+        p = self.plugin
+        calls = []
+        def fake(method, path, **kw):
+            calls.append((method, path))
+            if path == p.STATUS:
+                return {"items": {"daily_wheel": {"used_today": 0, "max_plays": 5, "cost": 5}}}
+            if path == p.ME:
+                return {"user": {"points": 100}}
+            return {"code": "ok"}
+        p._request = fake
+        self.assertEqual(p._run()["code"], 1)
+        self.assertEqual(p._run()["code"], 1)
+        restarted = Dian115Wheel()
+        restarted.data = p.data
+        restarted._token = p._token
+        restarted._notify = False
+        restarted._request = fake
+        self.assertEqual(restarted._run()["code"], 1)
+        self.assertEqual(calls.count(("POST", p.WHEEL)), 1)
+
     def test_ambiguous_post_response_never_retries_or_records_success(self):
         p = self.plugin
         p._max_spins = 5
@@ -658,6 +751,29 @@ class MonopolyTests(unittest.TestCase):
         result = self.p._run()
         self.assertEqual(len(result["data"]), 2)
         self.assertEqual(self.calls.count(("POST", self.p.MONOPOLY)), 2)
+
+    def test_stale_site_quota_across_runs_cannot_double_spend(self):
+        self.p._request = self.fake
+        self.p._max_spins = 1
+        self.assertEqual(self.p._run()["code"], 0)
+        self.assertEqual(self.p._run()["code"], 0)
+        self.assertEqual(self.p._run()["code"], 1)
+        self.assertEqual(self.calls.count(("POST", self.p.MONOPOLY)), 2)
+        restarted = Dian115Wheel()
+        restarted.data = self.p.data
+        restarted.init_plugin({"token": "test-token", "wheel_enabled": False, "monopoly_enabled": True, "notify": False})
+        restarted._request = self.fake
+        self.assertEqual(restarted._run()["code"], 1)
+        self.assertEqual(self.calls.count(("POST", self.p.MONOPOLY)), 2)
+
+    def test_monopoly_progress_storage_failure_keeps_pending_guard(self):
+        self.p._request = self.fake
+        original = self.p.save_data
+        self.p.save_data = lambda key, value: original(key, value) if key != "monopoly_progress" else None
+        self.assertEqual(self.p._run()["code"], 1)
+        self.assertEqual(self.p._run()["code"], 1)
+        self.assertEqual(self.calls.count(("POST", self.p.MONOPOLY)), 1)
+        self.assertEqual(self.p.get_data("monopoly_pending"), module.datetime.now().date().isoformat())
 
     def test_persistence_failure_never_sends_paid_post(self):
         self.p._request = self.fake
