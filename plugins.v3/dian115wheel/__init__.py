@@ -43,6 +43,7 @@ class Dian115Wheel(_PluginBase):
         self._token = ""
         self._cron = "0 10 * * *"
         self._spin_mode = "custom"
+        self._maximum_spins = False
         self._max_spins = 1
         self._min_balance = 5
         self._notify = True
@@ -63,7 +64,9 @@ class Dian115Wheel(_PluginBase):
         self._enabled = bool(config.get("enabled", False))
         self._token = self._extract_token(config.get("token") or "")
         self._cron = config.get("cron") or "0 10 * * *"
-        self._spin_mode = "maximum" if config.get("spin_mode") == "maximum" else "custom"
+        # 兼容旧版 spin_mode；新配置以最大次数开关为准。
+        self._maximum_spins = bool(config.get("maximum_spins", config.get("spin_mode") == "maximum"))
+        self._spin_mode = "maximum" if self._maximum_spins else "custom"
         self._max_spins = max(1, min(100, int(config.get("max_spins") if config.get("max_spins") is not None else 1)))
         self._min_balance = max(0, int(config.get("min_balance") if config.get("min_balance") is not None else 5))
         self._notify = bool(config.get("notify", True))
@@ -71,7 +74,7 @@ class Dian115Wheel(_PluginBase):
         self._proxy = str(config.get("proxy") or "").strip()
         if config.get("onlyonce"):
             self.update_config({"enabled": self._enabled, "token": self._token, "cron": self._cron,
-                                "spin_mode": self._spin_mode,
+                                "spin_mode": self._spin_mode, "maximum_spins": self._maximum_spins,
                                 "max_spins": self._max_spins, "min_balance": self._min_balance,
                                 "notify": self._notify, "use_system_proxy": self._use_system_proxy,
                                 "proxy": self._proxy, "onlyonce": False})
@@ -283,19 +286,16 @@ class Dian115Wheel(_PluginBase):
             field("VSwitch", "enabled", "启用定时抽奖"),
             field("VTextField", "token", "癫影 __Host-portal_token", type="password", hint="登录 m.dian115.com 后从浏览器 Cookie 复制；不与签到插件共享登录状态", persistent_hint=True),
             field("VTextField", "cron", "Cron（默认每天 10:00）"),
-            field("VSelect", "spin_mode", "抽奖次数模式", items=[
-                {"title": "自定义次数", "value": "custom"},
-                {"title": "最大次数（抽完今日剩余额度）", "value": "maximum"}],
-                  hint="最大次数按站点今日剩余额度执行；两种模式均逐次检查积分保留限制", persistent_hint=True),
-            field("VTextField", "max_spins", "自定义次数（仅自定义模式生效）", type="number", min="1", max="100"),
+            field("VTextField", "max_spins", "自定义次数", type="number", min="1", max="100", hint="最大次数关闭时，每轮按此次数抽奖（默认 1 次）", persistent_hint=True),
+            field("VSwitch", "maximum_spins", "最大次数", hint="开启时改为按站点今日剩余额度抽奖，忽略自定义次数；仍受积分保留限制", persistent_hint=True),
             field("VTextField", "min_balance", "抽奖后至少保留积分", type="number", min="0"),
             field("VSwitch", "notify", "中奖结果通知"),
             field("VSwitch", "use_system_proxy", "使用系统代理（默认开启）"),
             field("VTextField", "proxy", "自定义代理（关闭系统代理时生效）"),
             field("VSwitch", "onlyonce", "保存后立即运行一次（消耗积分）"),
-            {"component": "VAlert", "props": {"type": "warning", "variant": "tonal", "text": "幸运转盘会消耗积分；最大次数按站点今日剩余额度执行，逐次检查积分与限额；不自动重试抽奖 POST。"}},
+            {"component": "VAlert", "props": {"type": "warning", "variant": "tonal", "text": "抽奖会消耗积分；最大次数开启时按站点今日剩余额度执行，逐次检查积分与限额；抽奖 POST 不自动重试。"}},
         ]}]
-        return form, {"enabled": False, "token": "", "cron": "0 10 * * *", "spin_mode": "custom", "max_spins": 1,
+        return form, {"enabled": False, "token": "", "cron": "0 10 * * *", "maximum_spins": False, "max_spins": 1,
                       "min_balance": 5, "notify": True, "use_system_proxy": True, "proxy": "", "onlyonce": False}
 
     def get_page(self):

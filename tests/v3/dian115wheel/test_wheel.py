@@ -65,11 +65,14 @@ class WheelTests(unittest.TestCase):
         self.assertFalse(defaults["enabled"])
         self.assertFalse(defaults["onlyonce"])
         self.assertEqual(defaults["max_spins"], 1)
-        self.assertEqual(defaults["spin_mode"], "custom")
+        self.assertFalse(defaults["maximum_spins"])
         fields = form[0]["content"]
-        selector = next(f for f in fields if f.get("props", {}).get("model") == "spin_mode")
-        self.assertEqual(selector["component"], "VSelect")
-        self.assertEqual({i["value"] for i in selector["props"]["items"]}, {"custom", "maximum"})
+        by_model = {f.get("props", {}).get("model"): f for f in fields if "model" in f.get("props", {})}
+        self.assertEqual(by_model["max_spins"]["component"], "VTextField")
+        self.assertEqual(by_model["max_spins"]["props"]["label"], "自定义次数")
+        self.assertEqual(by_model["maximum_spins"]["component"], "VSwitch")
+        self.assertEqual(by_model["maximum_spins"]["props"]["label"], "最大次数")
+        self.assertFalse(any(f["component"] == "VSelect" for f in fields))
         self.assertEqual(form[0]["component"], "VForm")
         self.assertEqual(p.get_api()[0]["methods"], ["POST"])
 
@@ -97,6 +100,7 @@ class WheelTests(unittest.TestCase):
         self.assertEqual(p._token, "test-value")
         self.assertEqual(p._max_spins, 2)
         self.assertEqual(p.saved_config["spin_mode"], "custom")
+        self.assertFalse(p.saved_config["maximum_spins"])
         self.assertEqual(p._min_balance, 20)
         self.assertEqual(p.get_service(), [])
         worker.assert_called_once()
@@ -182,6 +186,19 @@ class WheelTests(unittest.TestCase):
         self.assertEqual(p.data["wheel_records"][0]["points"], 3)
         self.assertTrue(p.get_page())
 
+    def test_switch_mode_resolution_and_legacy_configuration(self):
+        for config, expected in (
+            ({}, "custom"),
+            ({"spin_mode": "maximum"}, "maximum"),
+            ({"maximum_spins": False}, "custom"),
+            ({"maximum_spins": True}, "maximum"),
+            ({"spin_mode": "maximum", "maximum_spins": False}, "custom"),
+        ):
+            with self.subTest(config=config):
+                p = Dian115Wheel()
+                p.init_plugin(config)
+                self.assertEqual(p._spin_mode, expected)
+
     def test_maximum_mode_uses_remaining_site_quota_and_ignores_custom_count(self):
         p = self.plugin
         p._spin_mode = "maximum"
@@ -222,7 +239,7 @@ class WheelTests(unittest.TestCase):
 
     def test_maximum_mode_respects_balance_limit(self):
         p = self.plugin
-        p.init_plugin({"token": "test-token", "spin_mode": "maximum", "max_spins": 1,
+        p.init_plugin({"token": "test-token", "maximum_spins": True, "max_spins": 1,
                        "min_balance": 10})
         calls = []
         def fake(method, path, **kw):
