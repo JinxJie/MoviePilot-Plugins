@@ -238,6 +238,32 @@ class HDHavenTests(unittest.TestCase):
         self.assertTrue(p._run(manual=True)["success"])
         self.assertEqual(len(s.posts), 1)
 
+    def test_today_pending_logs_skip_without_network_or_post(self):
+        module = load()
+        plugin = module.HDHavenSign()
+        plugin.init_plugin({"cookie": "hdh_session=placeholder", "notify": False})
+        today = module.datetime.now().date().isoformat()
+        plugin.save_data("last_result", {"date": today, "state": "pending"})
+        with patch.object(module.logger, "info") as info:
+            with patch.object(plugin, "_session", side_effect=AssertionError("不应创建网络会话")):
+                result = plugin._run(manual=True)
+        self.assertFalse(result["success"])
+        self.assertIn("结果待核对", str(info.call_args_list))
+        self.assertIn("不再发送请求", str(info.call_args_list))
+
+    def test_today_success_logs_skip_without_network_or_post(self):
+        module = load()
+        plugin = module.HDHavenSign()
+        plugin.init_plugin({"cookie": "hdh_session=placeholder", "notify": False})
+        today = module.datetime.now().date().isoformat()
+        plugin.save_data("last_result", {"date": today, "state": "success"})
+        with patch.object(module.logger, "info") as info:
+            with patch.object(plugin, "_session", side_effect=AssertionError("不应创建网络会话")):
+                result = plugin._run(manual=True)
+        self.assertTrue(result["success"])
+        self.assertIn("签到成功", str(info.call_args_list))
+        self.assertIn("不再发送请求", str(info.call_args_list))
+
     def test_invalid_session_never_posts(self):
         p = self.plugin()
         s = Session(account=Response(401, {"success": False}))

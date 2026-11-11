@@ -154,6 +154,8 @@ class HDHavenSign(_PluginBase):
             today = datetime.now().date().isoformat()
             previous = self.get_data("last_result") or {}
             if previous.get("date") == today and previous.get("state") in ("success", "pending"):
+                logger.info("栖影签到跳过：今日状态=%s，不再发送请求",
+                            "签到成功" if previous["state"] == "success" else "结果待核对")
                 return {"success": previous["state"] == "success", "message": "今日已执行或结果待核对，不重复提交"}
             session = self._session()
             # 仅用已知的只读账户接口预检登录状态。
