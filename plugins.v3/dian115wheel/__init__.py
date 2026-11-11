@@ -1,6 +1,7 @@
 """癫影娱乐 — MoviePilot V3 原生插件。仅在用户明确开启后游玩。"""
 import base64
 import os
+import random
 import threading
 import time
 import uuid
@@ -25,7 +26,7 @@ class Dian115Wheel(_PluginBase):
     plugin_name = "癫影娱乐"
     plugin_desc = "癫影幸运转盘与幸运大富翁：独立开关，依次运行，支持次数、余额限制、记录及通知；游玩消耗积分。"
     plugin_icon = "https://raw.githubusercontent.com/JinxJie/MoviePilot-Plugins/main/icons/dian115entertainment.png"
-    plugin_version = "3.1.0"
+    plugin_version = "3.1.1"
     plugin_author = "JinxJie"
     author_url = "https://github.com/JinxJie"
     plugin_config_prefix = "dian115wheel_"
@@ -291,6 +292,27 @@ class Dian115Wheel(_PluginBase):
                 "msg": f"转盘：{wheel['msg']}；大富翁：{monopoly['msg']}",
                 "data": wheel["data"] + monopoly["data"]}
 
+    def _pace_after_paid(self):
+        """从持久化的最近消费尝试起节流；只保证单实例顺序执行。"""
+        stamp = self.get_data("last_paid_attempt_at")
+        if stamp is None:
+            return
+        if isinstance(stamp, bool) or not isinstance(stamp, (int, float)) or stamp <= 0:
+            raise RuntimeError("消费冷却记录无效，已停止以保护积分")
+        elapsed = time.time() - stamp
+        if elapsed < 0:
+            raise RuntimeError("系统时间早于上次消费记录，已停止以保护积分")
+        wait = random.uniform(15.0, 25.0) - elapsed
+        if wait > 0:
+            time.sleep(wait)
+
+    def _mark_paid_attempt(self):
+        """POST 前保存时间戳；保存失败时绝不发送消费请求。"""
+        stamp = time.time()
+        self.save_data("last_paid_attempt_at", stamp)
+        if self.get_data("last_paid_attempt_at") != stamp:
+            raise RuntimeError("无法保存消费冷却记录，未发送游玩请求")
+
     def _run_wheel(self):
         results = []
         error = ""
@@ -305,6 +327,7 @@ class Dian115Wheel(_PluginBase):
                 progress = None
             # 每次读取站点限额，并用本地已完成次数兜底防止滞后计数。
             for _ in range(self._max_spins if self._spin_mode == "custom" else 100):
+                self._pace_after_paid()
                 status = self._request("GET", self.STATUS)
                 wheel = (status.get("items") or {}).get("daily_wheel") or {}
                 if not isinstance(wheel, dict) or any(key not in wheel for key in ("used_today", "max_plays")):
@@ -336,6 +359,7 @@ class Dian115Wheel(_PluginBase):
                 self.save_data("wheel_pending", today)
                 if self.get_data("wheel_pending") != today:
                     raise RuntimeError("无法保存转盘待核对标记，未发送抽奖请求")
+                self._mark_paid_attempt()
                 result = self._request("POST", self.WHEEL, retry=False)
                 prize = result.get("prize")
                 if not isinstance(prize, dict) or not any(key in prize for key in ("label", "points", "vip_days")):
@@ -363,6 +387,9 @@ class Dian115Wheel(_PluginBase):
             logger.warning(f"癫影转盘执行中断：{error}")
         if results and self._notify:
             try:
+                if "rate_limited" in error:
+                    raise RuntimeError("站点限流，本轮不再查询积分")
+                self._pace_after_paid()
                 balance = self._current_points()
             except Exception:
                 balance = None
@@ -415,6 +442,7 @@ class Dian115Wheel(_PluginBase):
             for _ in range(self._monopoly_max_spins if self._monopoly_spin_mode == "custom" else 100):
                 if self._monopoly_pending():
                     raise RuntimeError("大富翁结果仍待核对；今日不再自动游玩")
+                self._pace_after_paid()
                 status = self._request("GET", self.STATUS)
                 items = status.get("items")
                 game = items.get("monopoly") if isinstance(items, dict) else None
@@ -443,6 +471,7 @@ class Dian115Wheel(_PluginBase):
                 self.save_data("monopoly_pending", today)
                 if not self._monopoly_pending():
                     raise RuntimeError("无法保存大富翁待核对标记，未发送游玩请求")
+                self._mark_paid_attempt()
                 result = self._request("POST", self.MONOPOLY, retry=False)
                 award = self._award_int(result.get("award_points"))
                 steps = result.get("steps")
@@ -469,6 +498,9 @@ class Dian115Wheel(_PluginBase):
             logger.warning(f"癫影大富翁执行中断：{error}")
         if results and self._notify:
             try:
+                if "rate_limited" in error:
+                    raise RuntimeError("站点限流，本轮不再查询积分")
+                self._pace_after_paid()
                 balance = self._current_points()
             except Exception:
                 balance = None

@@ -56,6 +56,167 @@ class WheelTests(unittest.TestCase):
         self.plugin = Dian115Wheel()
         self.plugin._token = "fake-for-test-only"
         self.plugin._notify = False
+        self._sleep = patch.object(module.time, "sleep", return_value=None)
+        self._jitter = patch.object(module.random, "uniform", return_value=15.0)
+        self._sleep.start()
+        self._jitter.start()
+        self.addCleanup(self._sleep.stop)
+        self.addCleanup(self._jitter.stop)
+
+    def test_pacing_uses_random_minimum_interval_before_next_read_and_across_games(self):
+        p = self.plugin
+        p._max_spins = 2
+        p._monopoly_enabled = True
+        p._monopoly_max_spins = 1
+        calls = []
+        clock = [100.0]
+        def fake(method, path, **kw):
+            calls.append((method, path, clock[0]))
+            if path == p.STATUS:
+                return {"items": {"daily_wheel": {"used_today": 0, "max_plays": 3, "cost": 5},
+                                  "monopoly": {"used_today": 0, "max_plays": 3, "cost": 5}}}
+            if path == p.ME:
+                return {"user": {"points": 100}}
+            if path == p.WHEEL:
+                return {"cost": 5, "prize": {"label": "+2", "points": 2}}
+            if path == p.MONOPOLY:
+                return {"award_points": 2, "steps": [{"pos": 1}]}
+            self.fail("unexpected endpoint")
+        p._request = fake
+        def sleep(seconds):
+            clock[0] += seconds
+        with patch.object(module.time, "time", side_effect=lambda: clock[0]), \
+             patch.object(module.time, "sleep", side_effect=sleep), \
+             patch.object(module.random, "uniform", side_effect=[17.0, 19.0]) as jitter:
+            self.assertEqual(len(p._run()["data"]), 3)
+        self.assertEqual(jitter.call_count, 2)
+        self.assertEqual([t for m, path, t in calls if m == "POST"], [100.0, 117.0, 136.0])
+        self.assertEqual([t for m, path, t in calls if m == "GET" and path == p.STATUS], [100.0, 117.0, 136.0])
+
+    def test_cooldown_survives_new_plugin_instance(self):
+        p = self.plugin
+        calls = []
+        clock = [1000.0]
+        def fake(method, path, **kw):
+            calls.append((method, path, clock[0]))
+            if path == p.STATUS:
+                return {"items": {"daily_wheel": {"used_today": 0, "max_plays": 2, "cost": 5}}}
+            if path == p.ME:
+                return {"user": {"points": 100}}
+            if path == p.WHEEL:
+                return {"cost": 5, "prize": {"label": "+2", "points": 2}}
+            self.fail("unexpected endpoint")
+        p._request = fake
+        with patch.object(module.time, "time", side_effect=lambda: clock[0]), \
+             patch.object(module.time, "sleep", side_effect=lambda seconds: clock.__setitem__(0, clock[0] + seconds)), \
+             patch.object(module.random, "uniform", return_value=17.0):
+            self.assertEqual(len(p._run()["data"]), 1)
+            self.assertEqual(p.get_data("last_paid_attempt_at"), 1000.0)
+            restarted = Dian115Wheel()
+            restarted.data = p.data
+            restarted._token = p._token
+            restarted._notify = False
+            restarted._request = fake
+            clock[0] = 1003.0
+            self.assertEqual(len(restarted._run()["data"]), 1)
+        self.assertEqual([t for m, path, t in calls if m == "POST"], [1000.0, 1017.0])
+        self.assertEqual([t for m, path, t in calls if m == "GET" and path == p.STATUS], [1000.0, 1017.0])
+
+    def test_cooldown_storage_failure_never_posts(self):
+        p = self.plugin
+        calls = []
+        def fake(method, path, **kw):
+            calls.append((method, path))
+            if path == p.STATUS:
+                return {"items": {"daily_wheel": {"used_today": 0, "max_plays": 2, "cost": 5}}}
+            if path == p.ME:
+                return {"user": {"points": 100}}
+            self.fail("should never POST")
+        p._request = fake
+        original = p.save_data
+        p.save_data = lambda key, value: None if key == "last_paid_attempt_at" else original(key, value)
+        self.assertEqual(p._run()["code"], 1)
+        self.assertNotIn(("POST", p.WHEEL), calls)
+        self.assertIsNotNone(p.get_data("wheel_pending"))
+
+    def test_rate_limited_post_is_not_retried_and_keeps_pending(self):
+        p = self.plugin
+        p._wheel_enabled = False
+        p._monopoly_enabled = True
+        p._monopoly_max_spins = 3
+        calls = []
+        def fake(method, path, **kw):
+            calls.append((method, path))
+            if path == p.STATUS:
+                return {"items": {"monopoly": {"used_today": 0, "max_plays": 3, "cost": 5}}}
+            if path == p.ME:
+                return {"user": {"points": 100}}
+            if path == p.MONOPOLY:
+                if calls.count(("POST", p.MONOPOLY)) == 1:
+                    return {"award_points": 2, "steps": [{"pos": 1}]}
+                raise RuntimeError("站点接口失败：HTTP 400，代码 rate_limited")
+            self.fail("unexpected endpoint")
+        p._request = fake
+        with patch.object(module.time, "sleep"), patch.object(module.random, "uniform", return_value=15):
+            result = p._run()
+        self.assertEqual(len(result["data"]), 1)
+        self.assertIn("rate_limited", result["msg"])
+        self.assertEqual(calls.count(("POST", p.MONOPOLY)), 2)
+        self.assertIsNotNone(p.get_data("monopoly_pending"))
+        p._run()
+        self.assertEqual(calls.count(("POST", p.MONOPOLY)), 2)
+
+    def test_success_notification_waits_before_balance_read(self):
+        p = self.plugin
+        p._notify = True
+        calls = []
+        clock = [100.0]
+        def fake(method, path, **kw):
+            calls.append((method, path, clock[0]))
+            if path == p.STATUS:
+                return {"items": {"daily_wheel": {"used_today": 0, "max_plays": 1, "cost": 5}}}
+            if path == p.ME:
+                return {"user": {"points": 100}}
+            if path == p.WHEEL:
+                return {"cost": 5, "prize": {"label": "+2", "points": 2}}
+            self.fail("unexpected endpoint")
+        p._request = fake
+        with patch.object(module.time, "time", side_effect=lambda: clock[0]), \
+             patch.object(module.time, "sleep", side_effect=lambda seconds: clock.__setitem__(0, clock[0] + seconds)), \
+             patch.object(module.random, "uniform", return_value=18.0) as jitter:
+            self.assertEqual(len(p._run()["data"]), 1)
+        jitter.assert_called_once_with(15.0, 25.0)
+        self.assertEqual([t for m, path, t in calls if path == p.ME], [100.0, 118.0])
+        self.assertIn("当前积分：100", p.notices[0]["text"])
+
+    def test_rate_limited_notification_skips_balance_read(self):
+        for game in ("wheel", "monopoly"):
+            with self.subTest(game=game):
+                p = Dian115Wheel()
+                p.init_plugin({"token": "test-token", "game": game, "max_spins": 2,
+                               "monopoly_max_spins": 2, "notify": True})
+                calls = []
+                def fake(method, path, **kw):
+                    calls.append((method, path))
+                    paid = p.WHEEL if game == "wheel" else p.MONOPOLY
+                    if path == p.STATUS:
+                        item = "daily_wheel" if game == "wheel" else "monopoly"
+                        return {"items": {item: {"used_today": 0, "max_plays": 3, "cost": 5}}}
+                    if path == p.ME:
+                        return {"user": {"points": 100}}
+                    if path == paid:
+                        if calls.count(("POST", paid)) == 1:
+                            return ({"prize": {"label": "+2", "points": 2}, "cost": 5}
+                                    if game == "wheel" else {"award_points": 2, "steps": [{"pos": 1}]})
+                        raise RuntimeError("站点接口失败：HTTP 429，代码 rate_limited")
+                    self.fail("unexpected endpoint")
+                p._request = fake
+                with patch.object(module.time, "sleep"), patch.object(module.random, "uniform", return_value=15):
+                    result = p._run()
+                self.assertEqual(len(result["data"]), 1)
+                self.assertEqual(calls.count(("GET", p.ME)), 2)
+                self.assertIn("当前积分：获取失败", p.notices[0]["text"])
+                self.assertIn("rate_limited", p.notices[0]["text"])
 
     def test_system_proxy_dict_is_used_by_http_session(self):
         class FakeSession:
@@ -663,6 +824,12 @@ class MonopolyTests(unittest.TestCase):
         self.p = Dian115Wheel()
         self.p.init_plugin({"token": "test-token", "game": "monopoly", "notify": False})
         self.calls = []
+        self._sleep = patch.object(module.time, "sleep", return_value=None)
+        self._jitter = patch.object(module.random, "uniform", return_value=15.0)
+        self._sleep.start()
+        self._jitter.start()
+        self.addCleanup(self._sleep.stop)
+        self.addCleanup(self._jitter.stop)
 
     def fake(self, method, path, **kwargs):
         self.calls.append((method, path))
