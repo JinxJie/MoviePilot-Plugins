@@ -44,5 +44,19 @@
     "history": {
       "v3.0.0": "新增 V3 原生实现，兼容字典或对象型系统代理；保留普通签、运气签与默认关闭的签到后最大抽奖，修复签到签名格式并增加付费请求保护。"
     }
+  },
+  "HDHavenSign": {
+    "name": "栖影自动签到（V3）",
+    "description": "栖影 HDHaven 每日签到；手动或 Cron 定时执行，支持会话预检、系统代理、结果通知和单实例当日防重。登录人机验证需在浏览器手动完成。",
+    "labels": "签到,自动化,栖影",
+    "version": "3.0.0",
+    "icon": "https://raw.githubusercontent.com/JinxJie/MoviePilot-Plugins/main/icons/hdhavensign.png",
+    "author": "JinxJie",
+    "level": 2,
+    "release": false,
+    "system_version": ">=3.0.0",
+    "history": {
+      "v3.0.0": "首发 V3 原生版本：浏览器会话签到、只读会话预检、定时与手动运行、系统代理、结果通知及单实例当日防重。"
+    }
   }
 }
