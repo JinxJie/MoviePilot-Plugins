@@ -22,6 +22,10 @@ except ImportError:
     curl_requests = ec = hashes = None
 
 
+class PaidRateLimited(RuntimeError):
+    """Complete business rejection, not a lost or ambiguous response."""
+
+
 class Dian115Wheel(_PluginBase):
     plugin_name = "癫影娱乐"
     plugin_desc = "癫影幸运转盘与幸运大富翁：独立开关，依次运行，支持次数、余额限制、记录及通知；游玩消耗积分。"
@@ -238,7 +242,10 @@ class Dian115Wheel(_PluginBase):
         if response.status_code >= 400 or data.get("code") not in (None, "ok"):
             code = str(data.get("code") or "")
             # 不把站点返回的任意 msg 写入通知/日志，避免反射敏感信息。
-            raise RuntimeError(f"站点接口失败：HTTP {response.status_code}" + (f"，代码 {code}" if code and code.isidentifier() else ""))
+            message = f"站点接口失败：HTTP {response.status_code}" + (f"，代码 {code}" if code and code.isidentifier() else "")
+            if method == "POST" and code == "rate_limited":
+                raise PaidRateLimited(message)
+            raise RuntimeError(message)
         return data
 
     def _records(self):
@@ -425,7 +432,42 @@ class Dian115Wheel(_PluginBase):
             raise RuntimeError("大富翁奖励积分无效；请在站点核对，勿重试") from None
 
     def _monopoly_pending(self):
-        return self.get_data("monopoly_pending") == datetime.now().date().isoformat()
+        pending = self.get_data("monopoly_pending")
+        today = datetime.now().date().isoformat()
+        return pending == today or (isinstance(pending, dict) and pending.get("date") == today)
+
+    def _auto_reconcile_monopoly_pending(self):
+        """只有明确的业务拒绝且站点计数吻合时才自动恢复。"""
+        today = datetime.now().date().isoformat()
+        pending = self.get_data("monopoly_pending")
+        if pending is None:
+            return True
+        # 旧版仅保存日期，无法区分限流与超时/响应丢失，不能凭剩余额度放行。
+        if not isinstance(pending, dict) or pending.get("date") != today or pending.get("rejected") != "rate_limited":
+            return False
+        progress = self.get_data("monopoly_progress")
+        try:
+            expected = self._nonnegative_int(pending.get("expected_used"), "限流前已用次数")
+            if progress is not None:
+                if not isinstance(progress, dict) or progress.get("date") != today:
+                    return False
+                baseline = self._nonnegative_int(progress.get("baseline"), "本地基准次数")
+                count = self._nonnegative_int(progress.get("count"), "本地已玩次数")
+                if expected != baseline + count:
+                    return False
+            self._pace_after_paid()
+            status = self._request("GET", self.STATUS)
+            items = status.get("items")
+            game = items.get("monopoly") if isinstance(items, dict) else None
+            if not isinstance(game, dict):
+                return False
+            used = self._nonnegative_int(game.get("used_today"), "已用次数")
+            if used != expected:
+                return False
+            self.save_data("monopoly_pending", None)
+            return self.get_data("monopoly_pending") is None
+        except Exception:
+            return False
 
     def _run_monopoly(self):
         """独立玩法；只信任站点状态的额度和成本，不重发不确定的消费请求。"""
@@ -434,7 +476,8 @@ class Dian115Wheel(_PluginBase):
         results, error, initial_remaining = [], "", None
         try:
             if self._monopoly_pending():
-                raise RuntimeError("先前大富翁结果待核对；请在站点核对今日次数和积分，今日不再自动游玩")
+                if not self._auto_reconcile_monopoly_pending():
+                    raise RuntimeError("先前大富翁结果待核对；旧版标记无法区分限流与未知结果，或站点次数未能可靠核对；为避免重复扣分已停止")
             today = datetime.now().date().isoformat()
             progress = self.get_data("monopoly_progress")
             if not isinstance(progress, dict) or progress.get("date") != today:
@@ -468,11 +511,19 @@ class Dian115Wheel(_PluginBase):
                     break
                 # POST 前落盘；若请求结果未知，重启后也不可再次消费。
                 today = datetime.now().date().isoformat()
-                self.save_data("monopoly_pending", today)
-                if not self._monopoly_pending():
+                pending = {"date": today, "expected_used": used}
+                self.save_data("monopoly_pending", pending)
+                if self.get_data("monopoly_pending") != pending:
                     raise RuntimeError("无法保存大富翁待核对标记，未发送游玩请求")
                 self._mark_paid_attempt()
-                result = self._request("POST", self.MONOPOLY, retry=False)
+                try:
+                    result = self._request("POST", self.MONOPOLY, retry=False)
+                except PaidRateLimited:
+                    # Only a parsed, complete rate_limited response is a definite rejection.
+                    rejected = {**pending, "rejected": "rate_limited"}
+                    self.save_data("monopoly_pending", rejected)
+                    # If persistence fails, leave the original ambiguous marker in place.
+                    raise
                 award = self._award_int(result.get("award_points"))
                 steps = result.get("steps")
                 if not isinstance(steps, list) or not steps:

@@ -139,7 +139,26 @@ class WheelTests(unittest.TestCase):
         self.assertNotIn(("POST", p.WHEEL), calls)
         self.assertIsNotNone(p.get_data("wheel_pending"))
 
-    def test_rate_limited_post_is_not_retried_and_keeps_pending(self):
+    def test_paid_rate_limit_response_is_typed_but_other_failures_are_not(self):
+        p = self.plugin
+        p._ensure_browser_session = lambda: None
+        p._signed_headers = lambda method, path: {}
+        class Response:
+            def __init__(self, status, body):
+                self.status_code = status
+                self.body = body
+            def json(self):
+                return self.body
+        for status, body, expected in ((400, {"code": "rate_limited"}, module.PaidRateLimited),
+                                       (429, {"code": "rate_limited"}, module.PaidRateLimited),
+                                       (429, {"code": "unexpected"}, RuntimeError)):
+            with self.subTest(status=status, body=body):
+                p._http = lambda: types.SimpleNamespace(request=lambda *args, **kwargs: Response(status, body))
+                with self.assertRaises(expected) as raised:
+                    p._request("POST", p.MONOPOLY, retry=False)
+                self.assertEqual(type(raised.exception), expected)
+
+    def test_rate_limited_post_stops_run_then_auto_reconciles_without_button(self):
         p = self.plugin
         p._wheel_enabled = False
         p._monopoly_enabled = True
@@ -148,13 +167,16 @@ class WheelTests(unittest.TestCase):
         def fake(method, path, **kw):
             calls.append((method, path))
             if path == p.STATUS:
-                return {"items": {"monopoly": {"used_today": 0, "max_plays": 3, "cost": 5}}}
+                used = 1 if calls.count(("POST", p.MONOPOLY)) >= 1 else 0
+                return {"items": {"monopoly": {"used_today": used, "max_plays": 2, "cost": 5}}}
             if path == p.ME:
                 return {"user": {"points": 100}}
             if path == p.MONOPOLY:
                 if calls.count(("POST", p.MONOPOLY)) == 1:
                     return {"award_points": 2, "steps": [{"pos": 1}]}
-                raise RuntimeError("站点接口失败：HTTP 400，代码 rate_limited")
+                if calls.count(("POST", p.MONOPOLY)) == 2:
+                    raise module.PaidRateLimited("站点接口失败：HTTP 400，代码 rate_limited")
+                return {"award_points": 2, "steps": [{"pos": 2}]}
             self.fail("unexpected endpoint")
         p._request = fake
         with patch.object(module.time, "sleep"), patch.object(module.random, "uniform", return_value=15):
@@ -162,9 +184,12 @@ class WheelTests(unittest.TestCase):
         self.assertEqual(len(result["data"]), 1)
         self.assertIn("rate_limited", result["msg"])
         self.assertEqual(calls.count(("POST", p.MONOPOLY)), 2)
-        self.assertIsNotNone(p.get_data("monopoly_pending"))
+        self.assertEqual(p.get_data("monopoly_pending")["rejected"], "rate_limited")
         p._run()
-        self.assertEqual(calls.count(("POST", p.MONOPOLY)), 2)
+        self.assertIsNone(p.get_data("monopoly_pending"))
+        self.assertEqual(calls.count(("POST", p.MONOPOLY)), 3)
+        self.assertEqual(p.get_data("monopoly_progress")["count"], 2)
+        self.assertNotIn("/reconcile-monopoly", [r["path"] for r in p.get_api()])
 
     def test_success_notification_waits_before_balance_read(self):
         p = self.plugin
@@ -933,6 +958,53 @@ class MonopolyTests(unittest.TestCase):
         self.assertEqual(self.p._run()["code"], 1)
         self.assertNotIn(("POST", self.p.MONOPOLY), self.calls)
 
+    def test_auto_reconcile_clears_only_when_site_count_matches_local_successes(self):
+        p = self.p
+        today = module.datetime.now().date().isoformat()
+        p.save_data("monopoly_pending", {"date": today, "expected_used": 1, "rejected": "rate_limited"})
+        p.save_data("monopoly_progress", {"date": today, "baseline": 0, "count": 1})
+        def after_pending(method, path, **kw):
+            if path == p.STATUS:
+                return {"items": {"monopoly": {"used_today": 1, "max_plays": 2, "cost": 7},
+                                  "daily_wheel": {"used_today": 0, "max_plays": 99, "cost": 1}}}
+            return self.fake(method, path, **kw)
+        p._request = after_pending
+        self.assertTrue(p._auto_reconcile_monopoly_pending())
+        self.assertIsNone(p.get_data("monopoly_pending"))
+
+    def test_auto_reconcile_keeps_guard_when_site_count_increased(self):
+        p = self.p
+        today = module.datetime.now().date().isoformat()
+        p.save_data("monopoly_pending", {"date": today, "expected_used": 1, "rejected": "rate_limited"})
+        p.save_data("monopoly_progress", {"date": today, "baseline": 0, "count": 1})
+        p._request = lambda method, path, **kw: {"items": {"monopoly": {"used_today": 2, "max_plays": 3, "cost": 7}}}
+        self.assertFalse(p._auto_reconcile_monopoly_pending())
+        self.assertIsNotNone(p.get_data("monopoly_pending"))
+
+    def test_legacy_pending_and_ambiguous_result_never_auto_resume(self):
+        p = self.p
+        today = module.datetime.now().date().isoformat()
+        p.save_data("monopoly_progress", {"date": today, "baseline": 0, "count": 1})
+        p._request = lambda method, path, **kw: {"items": {"monopoly": {"used_today": 1, "max_plays": 3, "cost": 7}}}
+        for pending in (today, {"date": today, "expected_used": 1}):
+            p.save_data("monopoly_pending", pending)
+            self.assertEqual(p._run()["code"], 1)
+            self.assertEqual(p.get_data("monopoly_pending"), pending)
+
+    def test_reconcile_read_failure_and_failed_clear_keep_guard(self):
+        p = self.p
+        today = module.datetime.now().date().isoformat()
+        pending = {"date": today, "expected_used": 0, "rejected": "rate_limited"}
+        p.save_data("monopoly_pending", pending)
+        p._request = lambda method, path, **kw: (_ for _ in ()).throw(RuntimeError("read failed"))
+        self.assertFalse(p._auto_reconcile_monopoly_pending())
+        self.assertEqual(p.get_data("monopoly_pending"), pending)
+        p._request = lambda method, path, **kw: {"items": {"monopoly": {"used_today": 0}}}
+        original = p.save_data
+        p.save_data = lambda key, value: None if key == "monopoly_pending" and value is None else original(key, value)
+        self.assertFalse(p._auto_reconcile_monopoly_pending())
+        self.assertEqual(p.get_data("monopoly_pending"), pending)
+
     def test_ambiguous_response_persists_guard_across_runs(self):
         self.p._max_spins = 2
         def ambiguous(method, path, **kw):
@@ -942,7 +1014,7 @@ class MonopolyTests(unittest.TestCase):
             return self.fake(method, path, **kw)
         self.p._request = ambiguous
         self.assertEqual(self.p._run()["code"], 1)
-        self.assertEqual(self.p.get_data("monopoly_pending"), module.datetime.now().date().isoformat())
+        self.assertEqual(self.p.get_data("monopoly_pending")["date"], module.datetime.now().date().isoformat())
         self.assertEqual(self.p._run()["code"], 1)
         self.assertEqual(self.calls.count(("POST", self.p.MONOPOLY)), 1)
 
@@ -957,7 +1029,7 @@ class MonopolyTests(unittest.TestCase):
         self.assertEqual(self.p._run()["code"], 1)
         self.assertEqual(self.p._run()["code"], 1)
         self.assertEqual(self.calls.count(("POST", self.p.MONOPOLY)), 1)
-        self.assertEqual(self.p.get_data("monopoly_pending"), module.datetime.now().date().isoformat())
+        self.assertEqual(self.p.get_data("monopoly_pending")["date"], module.datetime.now().date().isoformat())
 
     def test_maximum_caps_at_initial_quota_despite_stale_counter(self):
         self.p._monopoly_spin_mode = "maximum"
@@ -1006,7 +1078,7 @@ class MonopolyTests(unittest.TestCase):
         self.assertEqual(self.p._run()["code"], 1)
         self.assertEqual(self.p._run()["code"], 1)
         self.assertEqual(self.calls.count(("POST", self.p.MONOPOLY)), 1)
-        self.assertEqual(self.p.get_data("monopoly_pending"), module.datetime.now().date().isoformat())
+        self.assertEqual(self.p.get_data("monopoly_pending")["date"], module.datetime.now().date().isoformat())
 
     def test_persistence_failure_never_sends_paid_post(self):
         self.p._request = self.fake
@@ -1035,7 +1107,7 @@ class MonopolyTests(unittest.TestCase):
         self.assertEqual(self.p._run()["code"], 1)
         self.assertEqual(self.p._run()["code"], 1)
         self.assertEqual(self.calls.count(("POST", self.p.MONOPOLY)), 1)
-        self.assertEqual(self.p.get_data("monopoly_pending"), module.datetime.now().date().isoformat())
+        self.assertEqual(self.p.get_data("monopoly_pending")["date"], module.datetime.now().date().isoformat())
 
     def test_missing_monopoly_status_never_falls_back_to_wheel(self):
         self.p._request = lambda method, path, **kw: {"items": {"daily_wheel": {"used_today": 0, "max_plays": 10, "cost": 5}}}
