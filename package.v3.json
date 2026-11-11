@@ -49,15 +49,16 @@
   },
   "HDHavenSign": {
     "name": "栖影自动签到（V3）",
-    "description": "栖影 HDHaven 每日签到；手动或 Cron 定时执行，支持会话预检、系统代理、结果通知和单实例当日防重。登录人机验证需在浏览器手动完成。",
+    "description": "栖影 HDHaven 每日签到；先只读核对站点今日签到状态，已签到跳过、明确未签到才提交，支持系统代理与脱敏诊断日志。登录人机验证需在浏览器手动完成。",
     "labels": "签到,自动化,栖影",
-    "version": "3.0.0",
+    "version": "3.0.1",
     "icon": "https://raw.githubusercontent.com/JinxJie/MoviePilot-Plugins/main/icons/hdhavensign.png",
     "author": "JinxJie",
     "level": 2,
     "release": false,
     "system_version": ">=3.0.0",
     "history": {
+      "v3.0.1": "签到前检查站点 checkin_today；待核对时也先查询站点，已签到跳过，明确未签到才提交；增加脱敏代理与预检诊断日志。",
       "v3.0.0": "首发 V3 原生版本：浏览器会话签到、只读会话预检、定时与手动运行、系统代理、结果通知及单实例当日防重。"
     }
   }

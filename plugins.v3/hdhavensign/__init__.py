@@ -20,7 +20,7 @@ class HDHavenSign(_PluginBase):
     plugin_name = "栖影自动签到"
     plugin_desc = "HDHaven 普通签到、定时执行及结果通知"
     plugin_icon = "https://raw.githubusercontent.com/JinxJie/MoviePilot-Plugins/main/icons/hdhavensign.png"
-    plugin_version = "3.0.0"
+    plugin_version = "3.0.1"
     plugin_author = "JinxJie"
     author_url = "https://github.com/JinxJie"
     plugin_config_prefix = "hdhavensign_"
@@ -131,8 +131,8 @@ class HDHavenSign(_PluginBase):
                 raise RuntimeError("签到结果数字字段缺失；请人工核对")
             return {"state": "success", "earned": result["earned"],
                     "points": result["points"], "streak": result["checkin_streak"]}
-        # 尚未获得站点“已签到”响应证据，所有非成功响应均视为结果不确定，不自动重试。
-        raise RuntimeError("签到响应未确认，请在站点核对；勿自动重试")
+        # 只有明确确认成功的响应才记为成功；下次运行需先读取站点状态再决定是否提交。
+        raise RuntimeError("签到响应未确认，请在站点核对；再次运行会先查询站点今日签到状态")
 
     def _notice(self, title, text):
         if self._notify:
@@ -152,13 +152,8 @@ class HDHavenSign(_PluginBase):
             if not self._cookie:
                 raise RuntimeError("未配置栖影登录会话 Cookie")
             today = datetime.now().date().isoformat()
-            previous = self.get_data("last_result") or {}
-            if previous.get("date") == today and previous.get("state") in ("success", "pending"):
-                logger.info("栖影签到跳过：今日状态=%s，不再发送请求",
-                            "签到成功" if previous["state"] == "success" else "结果待核对")
-                return {"success": previous["state"] == "success", "message": "今日已执行或结果待核对，不重复提交"}
             session = self._session()
-            # 仅用已知的只读账户接口预检登录状态。
+            # 先查询站点签到状态；本地待核对记录不能代替站点结果。
             stage = "登录预检"
             logger.info("栖影签到登录预检：开始只读请求")
             me = session.get(self.BASE + "/api/auth/me", timeout=20)
@@ -173,6 +168,21 @@ class HDHavenSign(_PluginBase):
             if me.status_code != 200 or account.get("success") is not True or not has_account:
                 raise RuntimeError("会话未通过登录预检，请重新登录并更新 Cookie")
             logger.info("栖影签到登录预检：通过")
+            status = account["data"].get("checkin_today")
+            last_checkin = account["data"].get("last_checkin")
+            if type(status) is not bool or (last_checkin is not None and
+                                            (not isinstance(last_checkin, str) or
+                                             (status and last_checkin != today) or
+                                             (not status and last_checkin == today))):
+                raise RuntimeError("站点今日签到状态无法确认，未发送签到请求")
+            if status:
+                self.save_data("last_result", {"date": today, "state": "success"})
+                saved = self.get_data("last_result") or {}
+                if saved.get("date") != today or saved.get("state") != "success":
+                    raise RuntimeError("站点确认今日已签到，但本地记录保存失败")
+                logger.info("栖影签到：站点确认今日已签到，跳过提交")
+                return {"success": True, "message": "站点确认今日已签到，不重复提交"}
+            logger.info("栖影签到：站点确认今日未签到，准备提交")
             # 持久化并读回 pending，防止 POST 已送达而本地无法记录时再次扣账/重复签到。
             self.save_data("last_result", {"date": today, "state": "pending"})
             marker = self.get_data("last_result") or {}
@@ -234,7 +244,7 @@ class HDHavenSign(_PluginBase):
             field("VSwitch", "use_system_proxy", "使用系统代理（默认开启）"),
             field("VTextField", "proxy", "自定义代理（关闭系统代理时使用）"),
             {"component": "VAlert", "props": {"type": "info", "variant": "tonal",
-                                      "text": "登录需浏览器完成人机验证；遇到未知签到结果不会自动重试，请登录站点核对。"}},
+                                      "text": "登录需浏览器完成人机验证；每次先查询站点签到状态，仅明确未签到才提交请求。"}},
         ]}], {"enabled": False, "onlyonce": False, "notify": True, "cookie": "",
               "cron": "30 9 * * *", "use_system_proxy": True, "proxy": ""})
 

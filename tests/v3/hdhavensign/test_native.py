@@ -3,6 +3,7 @@ import importlib.util
 import sys
 import types
 import unittest
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -56,7 +57,7 @@ class Response:
 
 SUCCESS = Response(201, {"success": True, "data": {"mode": "normal", "earned": 5,
                                                    "points": 25, "checkin_streak": 1}})
-ACCOUNT = Response(200, {"success": True, "data": {"id": 1}})
+ACCOUNT = Response(200, {"success": True, "data": {"id": 1, "checkin_today": False}})
 
 
 class Session:
@@ -235,34 +236,80 @@ class HDHavenTests(unittest.TestCase):
         self.assertEqual(s.posts[0], ((p.BASE + "/api/account/checkin",), {"timeout": 20}))
         self.assertTrue(s.closed)
         self.assertEqual(p.get_data("last_result")["state"], "success")
+        s.account = Response(200, {"success": True, "data": {
+            "id": 1, "checkin_today": True, "last_checkin": datetime.now().date().isoformat()}})
         self.assertTrue(p._run(manual=True)["success"])
         self.assertEqual(len(s.posts), 1)
 
-    def test_today_pending_logs_skip_without_network_or_post(self):
+    def test_today_pending_checks_site_and_skips_when_signed(self):
         module = load()
         plugin = module.HDHavenSign()
         plugin.init_plugin({"cookie": "hdh_session=placeholder", "notify": False})
         today = module.datetime.now().date().isoformat()
         plugin.save_data("last_result", {"date": today, "state": "pending"})
+        session = Session(account=Response(200, {"success": True, "data": {
+            "id": 1, "checkin_today": True, "last_checkin": today}}))
+        plugin._session = lambda: session
         with patch.object(module.logger, "info") as info:
-            with patch.object(plugin, "_session", side_effect=AssertionError("不应创建网络会话")):
-                result = plugin._run(manual=True)
-        self.assertFalse(result["success"])
-        self.assertIn("结果待核对", str(info.call_args_list))
-        self.assertIn("不再发送请求", str(info.call_args_list))
+            result = plugin._run(manual=True)
+        self.assertTrue(result["success"])
+        self.assertEqual(session.paths, [plugin.BASE + "/api/auth/me"])
+        self.assertEqual(session.posts, [])
+        self.assertEqual(plugin.get_data("last_result"), {"date": today, "state": "success"})
+        self.assertIn("站点确认今日已签到", str(info.call_args_list))
 
-    def test_today_success_logs_skip_without_network_or_post(self):
+    def test_today_pending_checks_site_and_signs_when_not_signed(self):
+        module = load()
+        plugin = module.HDHavenSign()
+        plugin.init_plugin({"cookie": "hdh_session=placeholder", "notify": False})
+        today = module.datetime.now().date().isoformat()
+        plugin.save_data("last_result", {"date": today, "state": "pending"})
+        session = Session(account=Response(200, {"success": True, "data": {
+            "id": 1, "checkin_today": False, "last_checkin": (datetime.now().date() - timedelta(days=1)).isoformat()}}))
+        plugin._session = lambda: session
+        self.assertTrue(plugin._run(manual=True)["success"])
+        self.assertEqual(len(session.posts), 1)
+        self.assertEqual(plugin.get_data("last_result")["state"], "success")
+
+    def test_today_success_still_checks_site(self):
         module = load()
         plugin = module.HDHavenSign()
         plugin.init_plugin({"cookie": "hdh_session=placeholder", "notify": False})
         today = module.datetime.now().date().isoformat()
         plugin.save_data("last_result", {"date": today, "state": "success"})
-        with patch.object(module.logger, "info") as info:
-            with patch.object(plugin, "_session", side_effect=AssertionError("不应创建网络会话")):
+        session = Session(account=Response(200, {"success": True, "data": {
+            "id": 1, "checkin_today": False}}))
+        plugin._session = lambda: session
+        self.assertTrue(plugin._run(manual=True)["success"])
+        self.assertEqual(len(session.posts), 1)
+
+    def test_unknown_site_status_preserves_pending_without_post(self):
+        module = load()
+        today = module.datetime.now().date().isoformat()
+        for data in ({"id": 1}, {"id": 1, "checkin_today": None},
+                     {"id": 1, "checkin_today": 0},
+                     {"id": 1, "checkin_today": False, "last_checkin": today},
+                     {"id": 1, "checkin_today": True, "last_checkin": (datetime.now().date() - timedelta(days=1)).isoformat()}):
+            with self.subTest(data=data):
+                plugin = module.HDHavenSign()
+                plugin.init_plugin({"cookie": "hdh_session=placeholder", "notify": False})
+                plugin.save_data("last_result", {"date": today, "state": "pending"})
+                session = Session(account=Response(200, {"success": True, "data": data}))
+                plugin._session = lambda: session
                 result = plugin._run(manual=True)
-        self.assertTrue(result["success"])
-        self.assertIn("签到成功", str(info.call_args_list))
-        self.assertIn("不再发送请求", str(info.call_args_list))
+                self.assertFalse(result["success"])
+                self.assertEqual(session.posts, [])
+                self.assertEqual(plugin.get_data("last_result"), {"date": today, "state": "pending"})
+
+    def test_preflight_failure_preserves_pending_without_post(self):
+        plugin = self.plugin()
+        today = datetime.now().date().isoformat()
+        plugin.save_data("last_result", {"date": today, "state": "pending"})
+        session = Session(account=Response(403, {"success": False}))
+        plugin._session = lambda: session
+        self.assertFalse(plugin._run(manual=True)["success"])
+        self.assertEqual(session.posts, [])
+        self.assertEqual(plugin.get_data("last_result"), {"date": today, "state": "pending"})
 
     def test_invalid_session_never_posts(self):
         p = self.plugin()
@@ -273,14 +320,17 @@ class HDHavenTests(unittest.TestCase):
         self.assertTrue(s.closed)
         self.assertIsNone(p.get_data("last_result"))
 
-    def test_ambiguous_post_stays_pending_across_runs(self):
+    def test_ambiguous_post_rechecks_site_before_retry(self):
         p = self.plugin()
         s = Session(result=TimeoutError("redacted"))
         p._session = lambda: s
         self.assertFalse(p._run(manual=True)["success"])
         self.assertEqual(p.get_data("last_result")["state"], "pending")
-        self.assertFalse(p._run(manual=True)["success"])
+        s.account = Response(200, {"success": True, "data": {
+            "id": 1, "checkin_today": True, "last_checkin": datetime.now().date().isoformat()}})
+        self.assertTrue(p._run(manual=True)["success"])
         self.assertEqual(len(s.posts), 1)
+        self.assertEqual(p.get_data("last_result")["state"], "success")
 
     def test_failed_marker_write_never_posts(self):
         p = self.plugin()
