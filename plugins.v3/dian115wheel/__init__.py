@@ -437,24 +437,29 @@ class Dian115Wheel(_PluginBase):
         return pending == today or (isinstance(pending, dict) and pending.get("date") == today)
 
     def _auto_reconcile_monopoly_pending(self):
-        """只有明确的业务拒绝且站点计数吻合时才自动恢复。"""
+        """旧标记先读站点额度和积分；以站点次数接管后续预检，不重发原请求。"""
         today = datetime.now().date().isoformat()
         pending = self.get_data("monopoly_pending")
         if pending is None:
             return True
-        # 旧版仅保存日期，无法区分限流与超时/响应丢失，不能凭剩余额度放行。
-        if not isinstance(pending, dict) or pending.get("date") != today or pending.get("rejected") != "rate_limited":
+        if pending != today and (not isinstance(pending, dict) or pending.get("date") != today):
+            return False
+        if isinstance(pending, dict) and pending.get("persistence_failed"):
             return False
         progress = self.get_data("monopoly_progress")
         try:
-            expected = self._nonnegative_int(pending.get("expected_used"), "限流前已用次数")
+            expected = None
+            if isinstance(pending, dict) and pending.get("expected_used") is not None:
+                expected = self._nonnegative_int(pending["expected_used"], "请求前已用次数")
             if progress is not None:
                 if not isinstance(progress, dict) or progress.get("date") != today:
                     return False
                 baseline = self._nonnegative_int(progress.get("baseline"), "本地基准次数")
                 count = self._nonnegative_int(progress.get("count"), "本地已玩次数")
-                if expected != baseline + count:
+                local_used = baseline + count
+                if expected is not None and expected != local_used:
                     return False
+                expected = local_used
             self._pace_after_paid()
             status = self._request("GET", self.STATUS)
             items = status.get("items")
@@ -462,8 +467,18 @@ class Dian115Wheel(_PluginBase):
             if not isinstance(game, dict):
                 return False
             used = self._nonnegative_int(game.get("used_today"), "已用次数")
-            if used != expected:
+            self._nonnegative_int(game.get("max_plays"), "每日额度")
+            self._nonnegative_int(game.get("cost"), "单次消耗")
+            if expected is not None and used < expected:
                 return False
+            # 余额只读核对；本轮新的消费仍由下面的逐次预检决定。
+            self._current_points()
+            if progress is not None and expected is not None and used > expected:
+                updated = {**progress, "baseline": used - count}
+                self.save_data("monopoly_progress", updated)
+                if self.get_data("monopoly_progress") != updated:
+                    return False
+            # 达到额度也可清理旧标记，下面的站点额度预检会正常结束本轮。
             self.save_data("monopoly_pending", None)
             return self.get_data("monopoly_pending") is None
         except Exception:
@@ -477,7 +492,7 @@ class Dian115Wheel(_PluginBase):
         try:
             if self._monopoly_pending():
                 if not self._auto_reconcile_monopoly_pending():
-                    raise RuntimeError("先前大富翁结果待核对；旧版标记无法区分限流与未知结果，或站点次数未能可靠核对；为避免重复扣分已停止")
+                    raise RuntimeError("站点额度或积分读取失败、次数倒退或记录无法保存；本轮不能安全预检")
             today = datetime.now().date().isoformat()
             progress = self.get_data("monopoly_progress")
             if not isinstance(progress, dict) or progress.get("date") != today:
@@ -533,12 +548,14 @@ class Dian115Wheel(_PluginBase):
                        "cost": cost, "label": f"大富翁奖励 {award} 积分", "points": award, "vip_days": 0}
                 self.save_data("wheel_records", (self._records() + [row])[-500:])
                 if row not in self._records():
+                    self.save_data("monopoly_pending", {**pending, "persistence_failed": True})
                     raise RuntimeError("大富翁结果未能持久保存；请在站点核对，勿重试")
                 if progress is None:
                     progress = {"date": today, "baseline": used, "count": 0}
                 progress = {**progress, "count": self._nonnegative_int(progress["count"], "本地已玩次数") + 1}
                 self.save_data("monopoly_progress", progress)
                 if self.get_data("monopoly_progress") != progress:
+                    self.save_data("monopoly_pending", {**pending, "persistence_failed": True})
                     raise RuntimeError("大富翁额度记录未能持久保存；请在站点核对，勿重试")
                 results.append(row)
                 self.save_data("monopoly_pending", None)
