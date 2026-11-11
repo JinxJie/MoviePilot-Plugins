@@ -281,16 +281,14 @@ MoviePilot-Plugins/
 ├── docs/                       # MoviePilot 插件开发与 V2/V3 适配文档
 ├── icons/                      # 插件图标资源
 ├── plugins.v2/                 # MoviePilot V2 插件
-│   ├── dian115sign/            # 癫影自动签到
-│   ├── hhlottery/              # HHCLUB 自动抽奖
-│   ├── nodeseek/               # NodeSeek 自动签到（V2）
-│   └── pluginresidueclean/     # 插件残留清理
+│   └── hhlottery/              # HHCLUB 自动抽奖
 ├── plugins.v3/                 # MoviePilot V3 原生插件
+│   ├── dian115sign/            # 癫影自动签到（V3）
 │   ├── dian115wheel/           # 癫影娱乐（V3）
 │   ├── hdhavensign/            # 栖影自动签到（V3）
 │   └── nodeseek/               # NodeSeek 自动签到（V3）
-├── scripts/                    # 上游辅助脚本
-├── tests/                      # 上游测试与插件测试支撑
+├── scripts/                    # 插件测试与依赖检查脚本
+├── tests/                      # CI 检查及 V1/V2/V3 插件测试
 ├── LICENSE                     # 开源许可证
 ├── package.json                # V1 市场索引（仅保留兼容元数据）
 ├── package.v2.json             # V2 插件市场索引
