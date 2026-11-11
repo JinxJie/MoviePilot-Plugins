@@ -5,8 +5,8 @@
 
 其它文档只负责专题内容：
 
-- [V2 插件迁移到 V3](./V3_Plugin_Adaptation.md)：旧导入兼容、媒体身份、音乐链和
-  存量数据迁移。
+- [V2 插件迁移到 V3](./V3_Plugin_Adaptation.md)：旧导入兼容、数据库事务、媒体身份、
+  音乐链和存量数据迁移。
 - [插件 API 专题](./V3_API_Response_Adaptation.md)：后端 API、Python 调用、Vue
   远程组件和原生响应。
 - [仓库与发布指南](./Repository_Guide.md)：索引文件、版本选择、CI 和 Release。
@@ -91,7 +91,7 @@ workspace/
 ```python
 from typing import Any
 
-from app.plugins import _PluginBase
+from app.sdk.plugin import _PluginBase
 
 
 class MyPlugin(_PluginBase):
@@ -199,7 +199,7 @@ class MyPlugin(_PluginBase):
 
 ## 5. `_PluginBase` 生命周期
 
-插件主类继承 `app.plugins._PluginBase`。最重要的不是实现尽可能多的方法，而是把
+插件主类继承 `app.sdk.plugin._PluginBase`。最重要的不是实现尽可能多的方法，而是把
 启用、停用和重复初始化做正确。
 
 ### 5.1 必须实现的方法
@@ -222,10 +222,11 @@ class MyPlugin(_PluginBase):
 | `get_dashboard()` / `get_dashboard_meta()` | 注册一个或多个仪表板 |
 | `get_render_mode()` | 选择 `vuetify` 或 `vue` 渲染模式 |
 | `get_sidebar_nav()` | 为 Vue 插件声明侧栏全页入口 |
+| `get_agent_pets()` | 为 Vue 插件声明智能助手形象 |
 | `get_actions()` | 注册工作流动作 |
 | `get_agent_tools()` | 注册 Agent 工具 |
 | `get_auth_providers()` | 注册外部认证入口 |
-| `get_module()` | 覆盖宿主模块能力；侵入性较强，谨慎使用 |
+| `get_module()` | 按模块合同提供扩展能力；支持歌词等候选聚合，也有覆盖型接口 |
 
 不要在模块导入期或类定义期启动任务、访问网络、连接数据库。后台资源应在
 `init_plugin()` 中按配置建立，并在 `stop_service()` 中可重复、安全地释放。
@@ -242,9 +243,11 @@ V3 已为插件整理稳定 SDK。新插件应优先从 `app.sdk` 导入，不�
 | 事件 | `app.sdk.events` |
 | 日志 | `app.sdk.logging` |
 | 缓存 | `app.sdk.cache` |
-| 媒体上下文、名称解析和媒体身份 | `app.sdk.media` |
+| 媒体上下文、名称解析、媒体身份与音乐歌词候选 `MusicLyrics` | `app.sdk.media` |
+| 媒体分类来源、字段声明、受控事实、缺失事实补充和统一分类调用 | `app.sdk.classification` |
 | HTTP、URL、站点和安全网络工具 | `app.sdk.network` |
 | 浏览器自动化（Playwright 上下文管理与页面操作） | `app.sdk.browser` |
+| 数据库备份、备份列表与校验 | `app.sdk.database` |
 | 插件和模块管理 | `app.sdk.plugins` |
 | 下载器、媒体服务器、通知、规则和存储服务 | `app.sdk.services` |
 | 文本门面（`StringUtils` 文本与格式化能力） | `app.sdk.string` |
@@ -271,9 +274,13 @@ with launch_browser_context(cookies=..., browser_type="chromium") as ctx:
 
 以下既有公开入口仍可稳定使用：`app.schemas`、`app.schemas.types`、
 `app.chain.*`、`app.plugins.*`、`app.modules.*`、`app.agent.*`、
-`app.api.endpoints.plugin`、`app.scheduler`、`app.db.models`、
-`app.db.oper.*`。使用具体能力前，应查看当前 V3 方法签名和对应专题文档，
-不要从目录名字推断合同。
+`app.api.endpoints.plugin`、`app.scheduler`、`app.db.oper.*`。插件确需建立自有表时，
+还可使用 `app.db` 公开的 `Base`、`DbOper`、四个事务装饰器以及建表所需的引擎对象。
+使用具体能力前，应查看当前 V3 方法签名和对应专题文档，不要从目录名字推断合同。
+
+`app.db.models.*` 是宿主 ORM 的内部表结构，不是插件数据访问合同。旧插件的导入目前
+可能仍能解析，但新代码不得直接查询或修改这些 Model，也不得根据其字段布局实现业务
+逻辑。数据库的具体边界见[数据库访问与 V3 事务规则](#73-数据库访问与-v3-事务规则)。
 
 以下入口属于兼容桥接，新插件代码禁止使用：
 
@@ -330,7 +337,120 @@ def write_report(self, content: str) -> None:
 
 不要把运行数据写回插件源码目录；插件更新时源码目录可能被替换。
 
-### 7.3 虚拟分身兼容
+### 7.3 数据库访问与 V3 事务规则
+
+先按数据责任选择入口，不要因为所有数据最终都落在同一个数据库里就直接操作宿主
+ORM：
+
+| 数据类型 | 应使用的入口 |
+| --- | --- |
+| 用户可编辑的插件设置 | `get_config()` / `update_config()` |
+| 小型、可序列化的插件状态 | `save_data()` / `get_data()` / `del_data()` 及异步变体 |
+| 报告、缓存文件、大对象 | `get_data_path()` |
+| 宿主已有业务数据 | 对应的 `app.db.oper.<entity>`，或宿主已提供的 Chain / SDK |
+| 需要索引、筛选或大量记录的插件自有数据 | 插件自有表 + `app.db` 公共事务装饰器 |
+
+V3 已把宿主数据库事务收口到显式 Session、Unit of Work 和组合根。插件必须遵守以下
+边界：
+
+- 不导入或操作 `app.db.models.*` 宿主 Model；访问宿主数据使用对应 Oper 或更高层的
+  Chain / SDK。
+- 不导入 `SessionFactory`、`AsyncSessionFactory`、`ScopedSession` 或宿主内部会话
+  模块。它们即使因兼容原因仍可导入，也不属于插件公开合同。
+- 无显式 Session 的宿主 Oper 调用是保留给插件的兼容入口。一次调用拥有一次独立事务；
+  不要假设连续多个 Oper 调用天然原子，也不要把一个 Oper 或 Session 保存在插件单例、
+  后台线程或异步任务之间复用。
+- 需要跨多个宿主写操作的原子业务流程时，优先调用宿主已有 Chain / SDK；缺少对应能力
+  时应先在主仓提供明确的应用服务，不要由插件自行拼接宿主事务。
+- `SystemConfig` 的宿主键必须使用 `SystemConfigKey`，插件自身配置则统一走基类方法；
+  不要用原始字符串在宿主配置表中创建自定义键。
+- `app.sdk.database` 只提供宿主管理的数据库备份、列表和校验能力，不是通用 SQL 或 ORM
+  入口。
+
+例如，只读宿主订阅数据时使用 Oper，不直接导入 `Subscribe` Model：
+
+```python
+from app.db.oper.subscribe import SubscribeOper
+
+
+def get_subscribe(self, subscribe_id: int):
+    """按订阅 ID 读取宿主订阅。"""
+    return SubscribeOper().get(sid=subscribe_id)
+```
+
+只有 `save_data()` 无法满足索引、筛选或数据量要求时，才建立插件自有表。V3 自有表
+使用 SQLAlchemy 2.0 的 `Mapped` / `mapped_column()` 声明；同步方法分别使用
+`db_query` 和 `db_update` 管理查询会话与提交、回滚、释放：
+
+```python
+from typing import Optional
+
+from sqlalchemy import String, select
+from sqlalchemy.orm import Mapped, Session, mapped_column
+
+from app.db import Base, db_query, db_update
+
+
+class MyPluginRecord(Base):
+    """我的插件拥有的示例记录。"""
+
+    __tablename__ = "plugin_myplugin_record"
+    # V3 热重载和虚拟分身会重复执行模型声明，必须复用同一份表元数据。
+    __table_args__ = {"extend_existing": True}
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    plugin_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+
+
+class MyPluginDatabaseMixin:
+    """供插件主类复用的自有表建表与数据访问方法。"""
+
+    @staticmethod
+    def ensure_table() -> None:
+        """仅创建本插件的数据表，不触发宿主全部元数据建表。"""
+        from app.db import Engine
+
+        MyPluginRecord.__table__.create(bind=Engine, checkfirst=True)
+
+    @db_update
+    def add_record(
+        self,
+        db: Optional[Session] = None,
+        *,
+        name: str,
+    ) -> int:
+        """新增记录，并由更新装饰器提交或回滚事务。"""
+        assert db is not None
+        record = MyPluginRecord(plugin_id=self.__class__.__name__, name=name)
+        db.add(record)
+        db.flush()
+        return record.id
+
+    @db_query
+    def list_records(self, db: Optional[Session] = None) -> list[dict]:
+        """在会话关闭前把记录转换为普通字典。"""
+        assert db is not None
+        records = db.execute(
+            select(MyPluginRecord).where(
+                MyPluginRecord.plugin_id == self.__class__.__name__
+            )
+        ).scalars().all()
+        return [{"id": record.id, "name": record.name} for record in records]
+```
+
+`ensure_table()` 应在 `init_plugin()` 中按需调用，不能在模块导入期或类定义期连接数据库。
+表名必须使用稳定且不会与宿主或其他插件冲突的插件前缀。`checkfirst=True` 只能创建缺失
+表，不能升级已有列；自有表结构变化时，插件必须提供按版本执行、可重复运行的迁移，先
+备份并验证数据，再更新插件记录的 schema 版本。不要把插件表迁移写入主仓 Alembic。
+自有表不会自动获得基类存储的分身隔离能力；支持虚拟分身时，必须像示例一样保存并过滤
+运行实例 ID。
+
+异步数据库方法使用 `async_db_query` / `async_db_update` 和 `AsyncSession`，不得在事件
+循环里调用同步数据库方法。查询返回前应完成 `list()`、标量提取或 DTO/字典转换，避免
+会话释放后再触发 ORM 懒加载。
+
+### 7.4 虚拟分身兼容
 
 新分身不会复制插件目录，也不会改写 Python、JavaScript 或 CSS。配置、结构化数据、
 数据目录、事件绑定、动态 API 和定时服务均按运行实例 ID 隔离；源插件更新后，引用它
@@ -350,7 +470,7 @@ def write_report(self, content: str) -> None:
 因此“共享源码”不等于“共享状态”。如果插件主动绕过基类存储，或依赖不可分配的
 进程级排他资源，应明确说明不适合创建多个实例。
 
-### 7.4 第三方依赖
+### 7.5 第三方依赖
 
 插件有额外 Python 依赖时，在插件目录增加 `pyproject.toml`：
 
@@ -358,7 +478,7 @@ def write_report(self, content: str) -> None:
 [project]
 name = "moviepilot-plugin-myplugin"
 dynamic = ["version"]
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 dependencies = [
     "example-package>=1",
 ]
@@ -377,7 +497,7 @@ dependencies = [
 
 宿主会保护核心依赖图；存在降级或不兼容要求时，插件安装会被拒绝。
 
-### 7.4 异步 HTTP 客户端
+### 7.6 异步 HTTP 客户端
 
 V3 的 `app.sdk.network.AsyncRequestUtils` 使用 HTTPX2。默认请求返回 `httpx2.Response`，传入
 自管客户端时只使用 `httpx2.AsyncClient`；直接依赖响应或异常类型的插件代码应导入 `httpx2`。
@@ -438,12 +558,75 @@ Vue 模式下，前端构建产物放入插件目录，由后端暴露静态资�
 `get_sidebar_nav()`。完整暴露名、路由、权限和多入口约束见：
 
 - [侧栏入口 FAQ](./faq/17-register-plugin-sidebar-nav.md)
+- [智能助手形象 FAQ](./faq/22-register-agent-pet.md)，替换页面右下角助手的角色时实现 `get_agent_pets()`
 - [MoviePilot-Frontend V3 模块联邦指南](https://github.com/jxxghp/MoviePilot-Frontend/blob/v3/docs/module-federation-guide.md)
 
 虚拟分身复用源插件的同一份 `remoteEntry.js`。宿主会向配置页、数据页、仪表盘、
 侧栏全页和登录组件传入当前实例的 `pluginId`、源身份 `sourcePluginId`，以及实例作用域
 的 `api`。联邦组件应优先使用这些 props；不要只读取全局 `window.MoviePilotAPI`，也不要
 自行根据源插件 ID 创建另一套 HTTP 客户端，否则请求会绕过实例 API 命名空间。
+
+### 8.3 联邦组件 CSS 不得污染主程序
+
+> **强制要求：联邦插件不得打包或发布 Vuetify、MDI 的全局基础样式。**
+
+联邦组件与主程序运行在同一个 `document`。远程 CSS 会由联邦运行时追加到主页面
+`<head>`，因此 `.v-card`、`.rounded-*`、`.elevation-*`、`html`、`body`、`:root` 等
+全局规则会同时修改主程序界面，而且离开插件页面后仍可能继续生效。Vue 的
+`<style scoped>` 只能约束插件自己编写的组件样式，不能修复被依赖包打入产物的全局 CSS。
+
+插件前端构建必须满足以下约束：
+
+1. 不要在远程组件依赖图中导入 `vuetify/styles` 或 MDI 全量样式。
+2. 共享 `vuetify/styles` 时必须设置 `generate: false`，复用主程序已有样式。
+3. PostCSS 必须移除来自 `node_modules/vuetify` 和 `node_modules/@mdi` 的 CSS。
+4. 不得提交或发布 `__federation_shared_vuetify/styles-*.css`。
+5. 可以保留 `.plugin-root .v-btn` 或 Vue `scoped`/`:deep()` 生成的插件内局部覆盖；不得直接编写 `.v-btn { ... }`。
+6. 构建后必须执行 `python .github/scripts/check_federation_css.py`。PR、pre-push 和 Release 都会执行同一门禁。
+7. 联邦插件在对应的 `package*.json` 中必须设置 `release: true`，确保正式发布工作流会打包其前端产物。
+
+推荐配置：
+
+```javascript
+federation({
+  name: 'MyPlugin',
+  filename: 'remoteEntry.js',
+  exposes: {
+    './Page': './src/components/Page.vue',
+    './Config': './src/components/Config.vue',
+  },
+  shared: {
+    vue: { requiredVersion: false, generate: false, singleton: true },
+    vuetify: { requiredVersion: false, generate: false, singleton: true },
+    'vuetify/styles': { requiredVersion: false, generate: false, singleton: true },
+  },
+})
+
+// vite.config.js
+css: {
+  postcss: {
+    plugins: [{
+      postcssPlugin: 'vuetify-filter',
+      Root(root) {
+        const sourcePath = root.source?.input?.file?.replaceAll('\\', '/') || ''
+        if (sourcePath.includes('/node_modules/vuetify/') ||
+            sourcePath.includes('/node_modules/@mdi/')) {
+          root.nodes = []
+          return
+        }
+        root.walkRules(rule => {
+          if (rule.selector &&
+              (rule.selector.includes('.v-') || rule.selector.includes('.mdi-'))) {
+            rule.remove()
+          }
+        })
+      },
+    }],
+  },
+}
+```
+
+不要仅以“`remoteEntry.js` 当前没有引用”为理由保留整包 Vuetify CSS。发布流程会打包插件目录，后续构建图变化也可能使这类文件重新进入加载链路；门禁会直接拒绝该产物。
 
 ## 9. 事件、API 和后台能力
 
@@ -539,6 +722,37 @@ def get_service(self) -> list[dict]:
 服务 ID 必须稳定且唯一。插件停用时，还要清理自行创建、不由宿主服务调度器管理的
 线程、异步任务、文件句柄或网络客户端。
 
+“立即运行一次”或“事件发生后延迟几秒执行”这类一次性任务，使用
+`app.sdk.scheduler.add_plugin_once_job()` 交给宿主调度器，不要为此自建
+`BackgroundScheduler`。自建调度器会常驻调度线程和工作线程，重复创建而不关闭还会让线程持续累积。
+
+```python
+from app.sdk import scheduler as scheduler_sdk
+
+
+def init_plugin(self, config: dict | None = None) -> None:
+    """保存配置时勾选“立即运行一次”，则延迟 3 秒执行一次刷新。"""
+    config = config or {}
+    if config.get("onlyonce"):
+        scheduler_sdk.add_plugin_once_job(
+            self.__class__.__name__,
+            "refresh_once",
+            self.refresh,
+            "我的插件立即运行一次",
+            delay_seconds=3,
+        )
+        config["onlyonce"] = False
+        self.update_config(config)
+```
+
+- 追加一次性任务不会重建 `get_service()` 声明的周期服务，也不会重置它们的计时。
+- 同一插件内同一任务 ID 重复追加时只保留最后一次，可以直接用来合并短时间内的重复触发。
+- `func` 传插件实例的绑定方法。插件重载换成新实例后，宿主会丢弃旧实例登记的待执行任务，插件卸载时任务一并清除。
+- 插件停止后不应再执行的任务，在 `stop_service()` 里用 `remove_plugin_once_job(插件ID, 任务ID)` 取消。
+- 调度器未运行时返回 `False`，调用方按需兜底。需要兼容尚未提供该接口的主程序时，用
+  `getattr(scheduler_sdk, "add_plugin_once_job", None)` 判断，或按
+  [限定主系统版本](./faq/18-limit-moviepilot-version.md) 声明 `system_version`。
+
 ### 9.4 通知、工作流和 Agent
 
 - 使用基类 `post_message()` 或 `app.sdk.services.NotificationHelper` 发送通知。
@@ -553,6 +767,8 @@ def get_service(self) -> list[dict]:
 - [Agent 工具](./faq/16-register-agent-tools.md)
 - [统一缓存](./faq/15-use-system-cache.md)
 - [媒体数据源](./faq/19-register-media-source.md)
+- [音乐歌词匹配与下载](./faq/21-register-lyrics-provider.md)：注册 `music_lyrics_candidates`，
+  返回 `list[MusicLyrics]`；插件负责匹配和下载文本，宿主负责聚合、择优和旁挂保存。
 
 ## 10. V3 业务合同
 
@@ -620,6 +836,9 @@ V2 实现会在独立进程中运行，避免同名模块互相污染：
 4. API、服务、命令和页面只注册一次。
 5. Vue 插件执行过 `yarn typecheck` 和 `yarn build`，并更新构建产物。
 
+插件访问数据库时还要覆盖成功提交、异常回滚、同步或异步会话释放，以及重复初始化时
+的自有表迁移；普通测试不得连接用户的真实数据库。
+
 ## 12. 发布插件
 
 发布前同步三处信息：
@@ -646,6 +865,7 @@ V2 实现会在独立进程中运行，避免同名模块互相污染：
 - [ ] `plugin_version`、索引 `version` 和最新 `history` 一致。
 - [ ] 新增类和方法具有说明职责的注释。
 - [ ] 使用稳定 SDK，没有新增不必要的宿主内部路径依赖。
+- [ ] 宿主数据只经 Oper、Chain 或稳定 SDK 访问；事务装饰器只用于插件自有表。
 - [ ] 配置初始化可重复执行，停用和重载会释放后台资源。
 - [ ] 插件运行数据不写入源码目录。
 - [ ] 普通 JSON 与原生响应遵守 API 专题说明。
@@ -658,7 +878,7 @@ V2 实现会在独立进程中运行，避免同名模块互相污染：
 | 问题 | 文档 |
 | --- | --- |
 | 插件目录、索引、版本和 Release | [仓库与发布指南](./Repository_Guide.md) |
-| V2 插件迁移、旧导入和媒体身份 | [V2 插件迁移到 V3](./V3_Plugin_Adaptation.md) |
+| V2 插件迁移、旧导入、数据库事务和媒体身份 | [V2 插件迁移到 V3](./V3_Plugin_Adaptation.md) |
 | API 返回、调用和 Vue 客户端 | [插件 API 专题](./V3_API_Response_Adaptation.md) |
 | 消息、服务、缓存、存储、Agent 等功能 | [常见问题](./FAQ.md) |
 | Vue 联邦组件 | [前端 V3 模块联邦指南](https://github.com/jxxghp/MoviePilot-Frontend/blob/v3/docs/module-federation-guide.md) |
