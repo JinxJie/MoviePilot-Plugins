@@ -96,6 +96,11 @@ class HDHavenSign(_PluginBase):
         proxy = self._proxy_from_settings() if self._use_system_proxy else self._proxy
         if proxy:
             session.proxies = {"http": proxy, "https": proxy}
+            logger.info("栖影签到网络路径：%s代理", "系统" if self._use_system_proxy else "自定义")
+        elif self._use_system_proxy:
+            logger.warning("栖影签到已开启系统代理，但未读取到代理配置，将直连")
+        else:
+            logger.info("栖影签到网络路径：直连（系统代理已关闭）")
         session.headers.update({
             "Cookie": cookie, "Accept": "*/*", "Accept-Language": "zh-CN,zh;q=0.9",
             "Referer": self.BASE + "/me", "Origin": self.BASE,
@@ -142,6 +147,7 @@ class HDHavenSign(_PluginBase):
         if not self._lock.acquire(blocking=False):
             return {"success": False, "message": "签到正在运行"}
         session = None
+        stage = "准备会话"
         try:
             if not self._cookie:
                 raise RuntimeError("未配置栖影登录会话 Cookie")
@@ -151,18 +157,33 @@ class HDHavenSign(_PluginBase):
                 return {"success": previous["state"] == "success", "message": "今日已执行或结果待核对，不重复提交"}
             session = self._session()
             # 仅用已知的只读账户接口预检登录状态。
+            stage = "登录预检"
+            logger.info("栖影签到登录预检：开始只读请求")
             me = session.get(self.BASE + "/api/auth/me", timeout=20)
+            content_type = (me.headers.get("content-type") or "").lower()
+            response_type = "JSON" if "json" in content_type else "非JSON"
+            logger.info("栖影签到登录预检：HTTP %s，响应类型=%s，发生跳转=%s",
+                        me.status_code, response_type, bool(getattr(me, "history", None)))
             account = self._decode(me)
-            if me.status_code != 200 or account.get("success") is not True or not isinstance(account.get("data"), dict) or not account["data"].get("id"):
+            has_account = isinstance(account.get("data"), dict) and bool(account["data"].get("id"))
+            logger.info("栖影签到登录预检：success=%s，账户标识存在=%s",
+                        account.get("success") is True, has_account)
+            if me.status_code != 200 or account.get("success") is not True or not has_account:
                 raise RuntimeError("会话未通过登录预检，请重新登录并更新 Cookie")
+            logger.info("栖影签到登录预检：通过")
             # 持久化并读回 pending，防止 POST 已送达而本地无法记录时再次扣账/重复签到。
             self.save_data("last_result", {"date": today, "state": "pending"})
             marker = self.get_data("last_result") or {}
             if marker.get("date") != today or marker.get("state") != "pending":
                 raise RuntimeError("待核对标记保存失败，未发送签到请求")
             # 浏览器 Network：POST /api/account/checkin，Content-Length: 0；不要传 json={}。
+            stage = "签到请求"
+            logger.info("栖影签到：预检通过且待核对标记已保存，准备提交签到")
             response = session.post(self.BASE + "/api/account/checkin", timeout=20)
+            logger.info("栖影签到响应：HTTP %s，响应类型=%s", response.status_code,
+                        "JSON" if "json" in (response.headers.get("content-type") or "").lower() else "非JSON")
             result = self._interpret(response)
+            stage = "结果保存"
             self.save_data("last_result", {"date": today, **result})
             saved = self.get_data("last_result") or {}
             if saved.get("date") != today or saved.get("state") != "success":
@@ -171,7 +192,7 @@ class HDHavenSign(_PluginBase):
             return {"success": True, "message": "签到成功", "data": result}
         except Exception as exc:
             # 不输出网络异常原文：可能含 Cookie/代理地址等敏感字段。
-            logger.warning("栖影签到未完成：%s", type(exc).__name__)
+            logger.warning("栖影签到未完成：阶段=%s，异常类型=%s", stage, type(exc).__name__)
             message = str(exc) if type(exc) in (RuntimeError, ValueError) else "请求或存储异常，结果可能已提交；请人工核对，勿重试"
             self._notice("栖影签到待核对", message)
             return {"success": False, "message": message}

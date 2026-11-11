@@ -4,7 +4,7 @@ import sys
 import types
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 PLUGIN = Path(__file__).resolve().parents[3] / "plugins.v3/hdhavensign/__init__.py"
 
@@ -136,6 +136,76 @@ class HDHavenTests(unittest.TestCase):
         self.assertEqual(plugin._session().proxies, {"http": "http://example:5", "https": "http://example:5"})
         plugin.init_plugin({"cookie": "hdh_session=placeholder", "use_system_proxy": False})
         self.assertEqual(plugin._session().proxies, {})
+
+    def test_session_logs_proxy_choice_without_address(self):
+        class FakeCurlSession:
+            def __init__(self, impersonate):
+                self.proxies = {}
+                self.headers = {}
+
+        module = load({"https": "http://user:secret@example:1"})
+        module.curl_requests = types.SimpleNamespace(Session=FakeCurlSession)
+        with patch.object(module.logger, "info") as info, patch.object(module.logger, "warning") as warning:
+            plugin = module.HDHavenSign()
+            plugin.init_plugin({"cookie": "hdh_session=placeholder"})
+            plugin._session()
+            self.assertIn("系统", str(info.call_args_list))
+            self.assertNotIn("secret", str(info.call_args_list))
+            self.assertNotIn("example", str(info.call_args_list))
+            plugin.init_plugin({"cookie": "hdh_session=placeholder", "use_system_proxy": False,
+                                "proxy": "http://user:secret@example:2"})
+            plugin._session()
+            self.assertIn("自定义", str(info.call_args_list))
+            self.assertNotIn("example", str(info.call_args_list))
+            plugin.init_plugin({"cookie": "hdh_session=placeholder", "use_system_proxy": False})
+            plugin._session()
+            self.assertIn("直连", str(info.call_args_list))
+            with patch.object(module.HDHavenSign, "_proxy_from_settings", return_value=""):
+                plugin.init_plugin({"cookie": "hdh_session=placeholder"})
+                plugin._session()
+            self.assertIn("将直连", str(warning.call_args_list))
+
+    def test_preflight_logs_redacted_status_and_failure_stage(self):
+        module = load()
+        plugin = module.HDHavenSign()
+        plugin.init_plugin({"cookie": "hdh_session=placeholder", "notify": False})
+        response = Response(403, {"success": False, "message": "private-token-secret"})
+        response.history = [object()]
+        session = Session(account=response)
+        plugin._session = lambda: session
+        with patch.object(module.logger, "info") as info, patch.object(module.logger, "warning") as warning:
+            result = plugin._run(manual=True)
+        self.assertFalse(result["success"])
+        self.assertEqual(session.posts, [])
+        self.assertIn("403", str(info.call_args_list))
+        self.assertIn("JSON", str(info.call_args_list))
+        self.assertIn("登录预检", str(warning.call_args_list))
+        self.assertNotIn("private-token-secret", str(info.call_args_list) + str(warning.call_args_list))
+
+    def test_non_json_preflight_logs_response_type_without_body(self):
+        module = load()
+        plugin = module.HDHavenSign()
+        plugin.init_plugin({"cookie": "hdh_session=placeholder", "notify": False})
+        session = Session(account=Response(403, "private-challenge-html", "text/html"))
+        plugin._session = lambda: session
+        with patch.object(module.logger, "info") as info, patch.object(module.logger, "warning") as warning:
+            result = plugin._run(manual=True)
+        self.assertIn("可能遭遇人机验证", result["message"])
+        self.assertIn("非JSON", str(info.call_args_list))
+        self.assertEqual(session.posts, [])
+        self.assertNotIn("private-challenge-html", str(info.call_args_list) + str(warning.call_args_list))
+
+    def test_preflight_request_exception_logs_stage_not_url(self):
+        module = load()
+        plugin = module.HDHavenSign()
+        plugin.init_plugin({"cookie": "hdh_session=placeholder", "notify": False})
+        session = Session()
+        session.get = Mock(side_effect=RuntimeError("private-proxy-url"))
+        plugin._session = lambda: session
+        with patch.object(module.logger, "warning") as warning:
+            plugin._run(manual=True)
+        self.assertIn("登录预检", str(warning.call_args_list))
+        self.assertNotIn("private-proxy-url", str(warning.call_args_list))
 
     def test_cookie_parsing(self):
         p = self.plugin()
