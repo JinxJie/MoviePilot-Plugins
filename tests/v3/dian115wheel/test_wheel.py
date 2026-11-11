@@ -37,7 +37,7 @@ def _install_stubs():
     setattr(modules["apscheduler.triggers.cron"], "CronTrigger", types.SimpleNamespace(from_crontab=lambda x: x))
     setattr(modules["app.plugins"], "_PluginBase", _Base)
     setattr(modules["app.sdk.config"], "settings", types.SimpleNamespace(PROXY=types.SimpleNamespace(host="")))
-    setattr(modules["app.sdk.logging"], "logger", types.SimpleNamespace(warning=lambda *a, **kw: None))
+    setattr(modules["app.sdk.logging"], "logger", types.SimpleNamespace(info=lambda *a, **kw: None, warning=lambda *a, **kw: None))
     setattr(modules["app.schemas.types"], "NotificationType", types.SimpleNamespace(Plugin="Plugin"))
     return patch.dict(sys.modules, modules)
 
@@ -62,6 +62,51 @@ class WheelTests(unittest.TestCase):
         self._jitter.start()
         self.addCleanup(self._sleep.stop)
         self.addCleanup(self._jitter.stop)
+
+    def test_progress_logs_arrive_before_paid_request_and_between_plays(self):
+        p = self.plugin
+        p._max_spins = 2
+        p._monopoly_enabled = True
+        events = []
+        def fake(method, path, **kw):
+            if method == "POST":
+                events.append(("post", path))
+                if path == p.WHEEL:
+                    return {"prize": {"label": "积分", "points": 2}}
+                return {"award_points": -3, "steps": [{"pos": 1}]}
+            if path == p.STATUS:
+                return {"items": {"daily_wheel": {"used_today": 0, "max_plays": 3, "cost": 5},
+                                  "monopoly": {"used_today": 0, "max_plays": 2, "cost": 5}}}
+            return {"user": {"points": 100}}
+        p._request = fake
+        with patch.object(module.logger, "info", side_effect=lambda msg: events.append(("log", msg))):
+            self.assertEqual(len(p._run()["data"]), 3)
+        posts = [i for i, event in enumerate(events) if event[0] == "post"]
+        self.assertEqual(len(posts), 3)
+        self.assertTrue(any("开始执行" in event[1] for event in events[:posts[0]]))
+        self.assertTrue(any("预检通过" in event[1] for event in events[:posts[0]]))
+        self.assertTrue(any("第 1 次完成" in event[1] for event in events[posts[0]:posts[1]]))
+        self.assertTrue(any("等待消费冷却" in event[1] for event in events[posts[0]:posts[1]]))
+        self.assertTrue(any("大富翁" in event[1] and "预检通过" in event[1] for event in events[:posts[2]]))
+        self.assertTrue(any("本轮结束" in event[1] for event in events[posts[-1]:]))
+
+    def test_page_record_points_are_signed_and_colored(self):
+        p = self.plugin
+        p.save_data("wheel_records", [{"points": 8, "cost": 5}, {"points": -4, "cost": 5},
+                                      {"points": 0, "cost": 5}, {"cost": 5}])
+        page = p.get_page()
+        rows = page[2]["content"][1]["content"][0]["content"][1]["content"]
+        self.assertEqual([(row["content"][3]["text"], row["content"][3]["props"].get("class")) for row in rows],
+                         [("—", None), ("0", None), ("-4", "text-error"), ("+8", "text-success")])
+        self.assertEqual([row["content"][2]["text"] for row in rows], ["5"] * 4)
+
+    def test_form_hints_have_room_before_following_field(self):
+        fields = self.plugin.get_form()[0][0]["content"]
+        for field in fields:
+            props = field.get("props", {})
+            if props.get("persistent-hint"):
+                self.assertEqual(props["class"], "mb-5")
+        self.assertEqual(next(f for f in fields if f.get("props", {}).get("model") == "cron")["props"]["class"], "mb-3")
 
     def test_pacing_uses_random_minimum_interval_before_next_read_and_across_games(self):
         p = self.plugin
@@ -771,6 +816,41 @@ class WheelTests(unittest.TestCase):
         self.assertEqual(calls.count(("POST", p.WHEEL)), 1)
         self.assertEqual(p.get_data("wheel_pending"), module.datetime.now().date().isoformat())
 
+    def test_wheel_duplicate_result_second_record_write_failure_keeps_guard(self):
+        p = self.plugin
+        p._max_spins = 1
+        calls = []
+        def fake(method, path, **kw):
+            calls.append((method, path))
+            if path == p.STATUS:
+                return {"items": {"daily_wheel": {"used_today": 0, "max_plays": 3, "cost": 5}}}
+            if path == p.ME:
+                return {"user": {"points": 100}}
+            self.assertEqual((method, path, kw.get("retry")), ("POST", p.WHEEL, False))
+            return {"cost": 5, "prize": {"label": "+3", "points": 3}}
+        p._request = fake
+        original = p.save_data
+        writes = []
+        def save(key, value):
+            if key == "wheel_records":
+                writes.append(value)
+                if len(writes) == 2:
+                    return None
+            return original(key, value)
+        p.save_data = save
+        fixed_now = module.datetime.now()
+        with patch.object(module, "datetime", wraps=module.datetime) as clock:
+            clock.now.return_value = fixed_now
+            self.assertEqual(p._run()["code"], 0)  # first play is recorded
+            self.assertEqual(p._run()["code"], 1)  # second POST returned but its record was lost
+            self.assertEqual(p._run()["code"], 1)  # pending prevents any further POST
+        self.assertEqual(calls.count(("POST", p.WHEEL)), 2)
+        self.assertEqual(len(p.get_data("wheel_records")), 1)
+        self.assertEqual(len(writes), 2)
+        self.assertEqual(writes[1], [writes[0][0], writes[0][0]])
+        self.assertEqual(p.get_data("wheel_progress")["count"], 1)
+        self.assertEqual(p.get_data("wheel_pending"), fixed_now.date().isoformat())
+
     def test_wheel_progress_failure_keeps_pending_guard(self):
         p = self.plugin
         calls = []
@@ -887,6 +967,23 @@ class MonopolyTests(unittest.TestCase):
         self.assertEqual(self.p.get_data("wheel_records")[0]["game"], "monopoly")
         self.assertIsNone(self.p.get_data("monopoly_pending"))
 
+    def test_monopoly_duplicate_record_write_failure_keeps_pending(self):
+        p = self.p
+        fixed_now = module.datetime.now()
+        row = {"date": fixed_now.isoformat(timespec="seconds"), "game": "monopoly",
+               "cost": 7, "label": "大富翁奖励 3 积分", "points": 3, "vip_days": 0}
+        p.save_data("wheel_records", [row])
+        original = p.save_data
+        p.save_data = lambda key, value: None if key == "wheel_records" else original(key, value)
+        p._request = self.fake
+        with patch.object(module, "datetime", wraps=module.datetime) as clock:
+            clock.now.return_value = fixed_now
+            self.assertEqual(p._run()["code"], 1)
+            self.assertEqual(p._run()["code"], 1)
+        self.assertEqual(self.calls.count(("POST", p.MONOPOLY)), 1)
+        self.assertEqual(p.get_data("wheel_records"), [row])
+        self.assertTrue(p.get_data("monopoly_pending").get("persistence_failed"))
+
     def test_both_enabled_run_wheel_then_monopoly(self):
         self.p.init_plugin({"token": "test-token", "wheel_enabled": True, "monopoly_enabled": True, "notify": False})
         def both(method, path, **kwargs):
@@ -981,7 +1078,7 @@ class MonopolyTests(unittest.TestCase):
         self.assertFalse(p._auto_reconcile_monopoly_pending())
         self.assertIsNotNone(p.get_data("monopoly_pending"))
 
-    def test_legacy_pending_and_ambiguous_result_reconcile_from_site(self):
+    def test_legacy_and_unknown_pending_stay_blocked_without_network(self):
         p = self.p
         today = module.datetime.now().date().isoformat()
         p.save_data("monopoly_progress", {"date": today, "baseline": 0, "count": 1})
@@ -992,62 +1089,54 @@ class MonopolyTests(unittest.TestCase):
                 return {"items": {"monopoly": {"used_today": 1, "max_plays": 2, "cost": 7}}}
             if path == p.ME:
                 return {"user": {"points": 20}}
-            if path == p.MONOPOLY:
-                return {"award_points": 3, "steps": [{"pos": 1}]}
-            self.fail("unexpected endpoint")
+            self.fail("pending request must never lead to a paid POST")
         p._request = site
         for pending in (today, {"date": today, "expected_used": 1}):
-            p.save_data("monopoly_pending", pending)
-            p.save_data("monopoly_progress", {"date": today, "baseline": 0, "count": 1})
-            p._monopoly_max_spins = 1
-            self.assertEqual(p._run()["code"], 0)
-            self.assertIsNone(p.get_data("monopoly_pending"))
-            self.assertEqual(p.get_data("monopoly_progress")["count"], 2)
-        self.assertEqual(calls.count(("POST", p.MONOPOLY)), 2)
+            with self.subTest(pending=pending):
+                p.save_data("monopoly_pending", pending)
+                self.assertFalse(p._auto_reconcile_monopoly_pending())
+                self.assertEqual(p._run()["code"], 1)
+                self.assertEqual(p.get_data("monopoly_pending"), pending)
+                self.assertEqual(p.get_data("monopoly_progress"), {"date": today, "baseline": 0, "count": 1})
+        self.assertEqual(calls, [])
 
-    def test_pending_site_count_advanced_below_quota_continues_with_fresh_preflight(self):
+    def test_pending_site_count_advanced_below_quota_stays_blocked(self):
         p = self.p
         today = module.datetime.now().date().isoformat()
-        p.save_data("monopoly_pending", today)
+        pending = {"date": today, "expected_used": 1, "rejected": "rate_limited"}
+        p.save_data("monopoly_pending", pending)
         p.save_data("monopoly_progress", {"date": today, "baseline": 0, "count": 1})
         calls = []
         def site(method, path, **kw):
             calls.append((method, path))
             if path == p.STATUS:
-                used = 3 if ("POST", p.MONOPOLY) in calls else 2
-                return {"items": {"monopoly": {"used_today": used, "max_plays": 3, "cost": 7}}}
+                return {"items": {"monopoly": {"used_today": 2, "max_plays": 3, "cost": 7}}}
             if path == p.ME:
                 return {"user": {"points": 20}}
-            if path == p.MONOPOLY:
-                self.assertEqual(kw.get("retry"), False)
-                return {"award_points": 3, "steps": [{"pos": 1}]}
-            self.fail("unexpected endpoint")
+            self.fail("site count increased without a known prize; no paid POST")
         p._request = site
-        p._monopoly_max_spins = 3
-        self.assertEqual(p._run()["code"], 0)
-        self.assertEqual(calls.count(("POST", p.MONOPOLY)), 1)
-        self.assertEqual(p.get_data("monopoly_progress"), {"date": today, "baseline": 1, "count": 2})
-        self.assertIsNone(p.get_data("monopoly_pending"))
-        self.assertEqual(calls[:4], [("GET", p.STATUS), ("GET", p.ME), ("GET", p.STATUS), ("GET", p.ME)])
+        self.assertEqual(p._run()["code"], 1)
+        self.assertEqual(p.get_data("monopoly_pending"), pending)
+        self.assertEqual(p.get_data("monopoly_progress"), {"date": today, "baseline": 0, "count": 1})
+        self.assertEqual(calls, [("GET", p.STATUS)])
 
-    def test_pending_site_count_advanced_updates_baseline_and_respects_quota(self):
+    def test_pending_site_count_advanced_to_quota_stays_blocked(self):
         p = self.p
         today = module.datetime.now().date().isoformat()
-        p.save_data("monopoly_pending", today)
+        pending = {"date": today, "expected_used": 1, "rejected": "rate_limited"}
+        p.save_data("monopoly_pending", pending)
         p.save_data("monopoly_progress", {"date": today, "baseline": 0, "count": 1})
         calls = []
         def site(method, path, **kw):
             calls.append((method, path))
             if path == p.STATUS:
                 return {"items": {"monopoly": {"used_today": 2, "max_plays": 2, "cost": 7}}}
-            if path == p.ME:
-                return {"user": {"points": 20}}
             self.fail("quota is exhausted; POST is forbidden")
         p._request = site
         self.assertEqual(p._run()["code"], 1)
-        self.assertIsNone(p.get_data("monopoly_pending"))
-        self.assertEqual(p.get_data("monopoly_progress"), {"date": today, "baseline": 1, "count": 1})
-        self.assertEqual(calls, [("GET", p.STATUS), ("GET", p.ME), ("GET", p.STATUS)])
+        self.assertEqual(p.get_data("monopoly_pending"), pending)
+        self.assertEqual(p.get_data("monopoly_progress"), {"date": today, "baseline": 0, "count": 1})
+        self.assertEqual(calls, [("GET", p.STATUS)])
 
     def test_pending_missing_balance_keeps_marker_and_never_posts(self):
         p = self.p
@@ -1077,7 +1166,7 @@ class MonopolyTests(unittest.TestCase):
         self.assertFalse(p._auto_reconcile_monopoly_pending())
         self.assertEqual(p.get_data("monopoly_pending"), pending)
 
-    def test_ambiguous_response_rechecks_site_before_next_attempt(self):
+    def test_ambiguous_response_keeps_guard_and_never_reposts(self):
         self.p._max_spins = 2
         def ambiguous(method, path, **kw):
             if method == "POST":
@@ -1088,11 +1177,10 @@ class MonopolyTests(unittest.TestCase):
         self.assertEqual(self.p._run()["code"], 1)
         self.assertEqual(self.p.get_data("monopoly_pending")["date"], module.datetime.now().date().isoformat())
         self.assertEqual(self.p._run()["code"], 1)
-        self.assertEqual(self.calls.count(("POST", self.p.MONOPOLY)), 2)
-        self.assertGreaterEqual(self.calls.count(("GET", self.p.STATUS)), 3)
-        self.assertGreaterEqual(self.calls.count(("GET", self.p.ME)), 3)
+        self.assertEqual(self.calls.count(("POST", self.p.MONOPOLY)), 1)
+        self.assertEqual(self.p.get_data("monopoly_pending")["date"], module.datetime.now().date().isoformat())
 
-    def test_transport_error_rechecks_site_before_next_attempt(self):
+    def test_transport_error_keeps_guard_and_never_reposts(self):
         self.p._max_spins = 3
         def timeout(method, path, **kw):
             if method == "POST":
@@ -1102,7 +1190,7 @@ class MonopolyTests(unittest.TestCase):
         self.p._request = timeout
         self.assertEqual(self.p._run()["code"], 1)
         self.assertEqual(self.p._run()["code"], 1)
-        self.assertEqual(self.calls.count(("POST", self.p.MONOPOLY)), 2)
+        self.assertEqual(self.calls.count(("POST", self.p.MONOPOLY)), 1)
         self.assertEqual(self.p.get_data("monopoly_pending")["date"], module.datetime.now().date().isoformat())
 
     def test_maximum_caps_at_initial_quota_despite_stale_counter(self):

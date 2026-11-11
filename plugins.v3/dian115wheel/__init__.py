@@ -30,7 +30,7 @@ class Dian115Wheel(_PluginBase):
     plugin_name = "癫影娱乐"
     plugin_desc = "癫影幸运转盘与幸运大富翁：独立开关，依次运行，支持次数、余额限制、记录及通知；游玩消耗积分。"
     plugin_icon = "https://raw.githubusercontent.com/JinxJie/MoviePilot-Plugins/main/icons/dian115entertainment.png"
-    plugin_version = "3.1.1"
+    plugin_version = "3.1.2"
     plugin_author = "JinxJie"
     author_url = "https://github.com/JinxJie"
     plugin_config_prefix = "dian115wheel_"
@@ -286,6 +286,8 @@ class Dian115Wheel(_PluginBase):
             return {"code": 1, "msg": "请先填写登录 Token"}
         if not self._wheel_enabled and not self._monopoly_enabled:
             return {"code": 1, "msg": "请先开启幸运转盘或幸运大富翁"}
+        logger.info("癫影娱乐开始执行：" + "、".join(name for enabled, name in
+                    ((self._wheel_enabled, "转盘"), (self._monopoly_enabled, "大富翁")) if enabled))
         if self._wheel_enabled:
             wheel = self._run_wheel()
             if not self._monopoly_enabled or wheel.get("unsafe_stop"):
@@ -311,6 +313,7 @@ class Dian115Wheel(_PluginBase):
             raise RuntimeError("系统时间早于上次消费记录，已停止以保护积分")
         wait = random.uniform(15.0, 25.0) - elapsed
         if wait > 0:
+            logger.info("癫影娱乐等待消费冷却后继续预检")
             time.sleep(wait)
 
     def _mark_paid_attempt(self):
@@ -325,6 +328,7 @@ class Dian115Wheel(_PluginBase):
         error = ""
         unsafe_stop = False
         initial_remaining = None
+        logger.info("癫影转盘开始核对站点额度和积分")
         try:
             if self.get_data("wheel_pending") == datetime.now().date().isoformat():
                 raise RuntimeError("先前转盘结果待核对；请在站点核对今日次数和积分，今日不再自动抽奖")
@@ -361,6 +365,7 @@ class Dian115Wheel(_PluginBase):
                 if points - cost < self._min_balance:
                     error = f"积分不足：余额 {points}，单次消耗 {cost}，需保留 {self._min_balance}"
                     break
+                logger.info(f"癫影转盘第 {len(results) + 1} 次预检通过：今日剩余 {maximum - used} 次，单次消耗 {cost} 积分")
                 # 请求前写入并读回待核对标记；结果未知时禁止后续轮次再次消费。
                 today = datetime.now().date().isoformat()
                 self.save_data("wheel_pending", today)
@@ -374,8 +379,9 @@ class Dian115Wheel(_PluginBase):
                 row = {"date": datetime.now().isoformat(timespec="seconds"), "cost": int(result.get("cost") if result.get("cost") is not None else cost),
                        "label": str(prize.get("label") or "未知"), "points": int(prize.get("points") or 0),
                        "vip_days": int(prize.get("vip_days") or 0)}
-                self.save_data("wheel_records", (self._records() + [row])[-500:])
-                if row not in self._records():
+                records = (self._records() + [row])[-500:]
+                self.save_data("wheel_records", records)
+                if self._records() != records:
                     raise RuntimeError("转盘结果未能持久保存；请在站点核对，勿重试")
                 if progress is None:
                     progress = {"date": today, "baseline": used, "count": 0}
@@ -387,6 +393,7 @@ class Dian115Wheel(_PluginBase):
                 self.save_data("wheel_pending", None)
                 if self.get_data("wheel_pending") is not None:
                     raise RuntimeError("转盘待核对标记未清除；请核对站点后再运行")
+                logger.info(f"癫影转盘第 {len(results)} 次完成：奖励积分 {row['points']}，消耗 {row['cost']}")
         except Exception as exc:
             # 不记录请求头/Token/返回体，避免凭据泄露。
             unsafe_stop = True
@@ -406,6 +413,7 @@ class Dian115Wheel(_PluginBase):
                                   text=self._notification_text(results, balance, error))
             except Exception:
                 logger.warning("癫影转盘通知发送失败")
+        logger.info(f"癫影转盘本轮结束：完成 {len(results)} 次" + ("，提前结束" if error else ""))
         return {"code": 0 if results else 1, "msg": f"完成 {len(results)} 次" + (f"；{error}" if error else ""), "data": results,
                 "unsafe_stop": unsafe_stop}
 
@@ -437,14 +445,16 @@ class Dian115Wheel(_PluginBase):
         return pending == today or (isinstance(pending, dict) and pending.get("date") == today)
 
     def _auto_reconcile_monopoly_pending(self):
-        """旧标记先读站点额度和积分；以站点次数接管后续预检，不重发原请求。"""
+        """仅核对服务端明确限流拒绝的标记；未知消费结果保持拦截。"""
         today = datetime.now().date().isoformat()
         pending = self.get_data("monopoly_pending")
         if pending is None:
             return True
         if pending != today and (not isinstance(pending, dict) or pending.get("date") != today):
             return False
-        if isinstance(pending, dict) and pending.get("persistence_failed"):
+        # 只自动处理服务端已明确拒绝的请求。超时、旧版日期标记或结果不明时，
+        # 站点次数与积分可读仍不能证明未扣分，也无法恢复遗失的奖品账目。
+        if not isinstance(pending, dict) or pending.get("rejected") != "rate_limited" or pending.get("persistence_failed"):
             return False
         progress = self.get_data("monopoly_progress")
         try:
@@ -469,16 +479,13 @@ class Dian115Wheel(_PluginBase):
             used = self._nonnegative_int(game.get("used_today"), "已用次数")
             self._nonnegative_int(game.get("max_plays"), "每日额度")
             self._nonnegative_int(game.get("cost"), "单次消耗")
-            if expected is not None and used < expected:
+            # 明确限流拒绝后，站点次数也必须与请求前一致；若有变化，
+            # 不猜测它来自哪次消费，更不在缺少结果时改写账目基准。
+            if expected is None or used != expected:
                 return False
             # 余额只读核对；本轮新的消费仍由下面的逐次预检决定。
             self._current_points()
-            if progress is not None and expected is not None and used > expected:
-                updated = {**progress, "baseline": used - count}
-                self.save_data("monopoly_progress", updated)
-                if self.get_data("monopoly_progress") != updated:
-                    return False
-            # 达到额度也可清理旧标记，下面的站点额度预检会正常结束本轮。
+            # 仅明确拒绝且站点读数未变时清理标记。
             self.save_data("monopoly_pending", None)
             return self.get_data("monopoly_pending") is None
         except Exception:
@@ -489,10 +496,11 @@ class Dian115Wheel(_PluginBase):
         if not self._token:
             return {"code": 1, "msg": "请先填写登录 Token"}
         results, error, initial_remaining = [], "", None
+        logger.info("癫影大富翁开始核对站点额度和积分")
         try:
             if self._monopoly_pending():
                 if not self._auto_reconcile_monopoly_pending():
-                    raise RuntimeError("站点额度或积分读取失败、次数倒退或记录无法保存；本轮不能安全预检")
+                    raise RuntimeError("先前大富翁结果待核对或站点次数变化；无法确认奖励与扣分，今日停止自动游玩")
             today = datetime.now().date().isoformat()
             progress = self.get_data("monopoly_progress")
             if not isinstance(progress, dict) or progress.get("date") != today:
@@ -524,6 +532,7 @@ class Dian115Wheel(_PluginBase):
                 if points - cost < self._monopoly_min_balance:
                     error = f"积分不足：余额 {points}，单次消耗 {cost}，需保留 {self._monopoly_min_balance}"
                     break
+                logger.info(f"癫影大富翁第 {len(results) + 1} 次预检通过：今日剩余 {maximum - used} 次，单次消耗 {cost} 积分")
                 # POST 前落盘；若请求结果未知，重启后也不可再次消费。
                 today = datetime.now().date().isoformat()
                 pending = {"date": today, "expected_used": used}
@@ -546,8 +555,9 @@ class Dian115Wheel(_PluginBase):
                 # 站点前端用 award_points 和 steps 展示结果；不把前端默认格子当成服务端结果。
                 row = {"date": datetime.now().isoformat(timespec="seconds"), "game": "monopoly",
                        "cost": cost, "label": f"大富翁奖励 {award} 积分", "points": award, "vip_days": 0}
-                self.save_data("wheel_records", (self._records() + [row])[-500:])
-                if row not in self._records():
+                records = (self._records() + [row])[-500:]
+                self.save_data("wheel_records", records)
+                if self._records() != records:
                     self.save_data("monopoly_pending", {**pending, "persistence_failed": True})
                     raise RuntimeError("大富翁结果未能持久保存；请在站点核对，勿重试")
                 if progress is None:
@@ -561,6 +571,7 @@ class Dian115Wheel(_PluginBase):
                 self.save_data("monopoly_pending", None)
                 if self.get_data("monopoly_pending") is not None:
                     raise RuntimeError("大富翁记录已保存但待核对标记未清除；请核对站点后再运行")
+                logger.info(f"癫影大富翁第 {len(results)} 次完成：奖励积分 {award}，消耗 {cost}")
         except Exception as exc:
             error = str(exc)[:200] if isinstance(exc, RuntimeError) else type(exc).__name__
             logger.warning(f"癫影大富翁执行中断：{error}")
@@ -577,6 +588,7 @@ class Dian115Wheel(_PluginBase):
                                   text=self._notification_text(results, balance, error).replace("本轮抽奖", "本轮游玩"))
             except Exception:
                 logger.warning("癫影大富翁通知发送失败")
+        logger.info(f"癫影大富翁本轮结束：完成 {len(results)} 次" + ("，提前结束" if error else ""))
         return {"code": 0 if results else 1, "msg": f"完成 {len(results)} 次" + (f"；{error}" if error else ""), "data": results}
 
     def get_service(self) -> List[Dict[str, Any]]:
@@ -599,6 +611,7 @@ class Dian115Wheel(_PluginBase):
     def get_form(self):
         def field(component, model, label, **props):
             return {"component": component, "props": {"model": model, "label": label,
+                                                    "class": "mb-5" if props.get("persistent_hint") else "mb-3",
                                                     **{k.replace("_", "-"): v for k, v in props.items()}}}
         form = [{"component": "VForm", "content": [
             field("VSwitch", "enabled", "启用定时抽奖"),
@@ -641,8 +654,21 @@ class Dian115Wheel(_PluginBase):
         cards = [item("已记录抽奖", len(all_records)), item("消耗积分", total_cost),
                  item("奖励积分", total_points), item("净积分", total_points - total_cost)]
         balance_card = item("当前积分（实时）", current_points if current_points is not None else "获取失败", balance=True)
-        rows = [{"component": "tr", "content": [{"component": "td", "text": str(r.get(k) if r.get(k) is not None else "—")}
-                for k in ("date", "label", "cost", "points", "vip_days")]} for r in records]
+        def record_cell(row, key):
+            value = row.get(key)
+            props = {}
+            if key == "points" and value is not None:
+                try:
+                    points = int(value)
+                except (ValueError, TypeError):
+                    pass
+                else:
+                    if points:
+                        props["class"] = "text-success" if points > 0 else "text-error"
+                        value = f"{points:+d}"
+            return {"component": "td", "props": props, "text": str(value if value is not None else "—")}
+        rows = [{"component": "tr", "content": [record_cell(r, k) for k in
+                ("date", "label", "cost", "points", "vip_days")]} for r in records]
         return [{"component": "VRow", "content": [balance_card]},
                 {"component": "VRow", "content": cards}, {"component": "VCard", "props": {"class": "mt-3"}, "content": [
             {"component": "VCardTitle", "text": "最近游玩记录（以本地记录为准）"},
