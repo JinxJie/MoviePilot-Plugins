@@ -1,8 +1,10 @@
 """栖影 HDHaven MoviePilot V3 自动签到。使用用户在浏览器取得的站点会话，不处理人机验证。"""
 import os
 import threading
+import json
 from datetime import datetime
 from http.cookies import SimpleCookie
+from urllib.parse import parse_qs, parse_qsl, urlencode, urlsplit, urlunsplit
 
 from app.plugins import _PluginBase
 from app.sdk.config import settings
@@ -16,11 +18,105 @@ except ImportError:
     curl_requests = None
 
 
+class _BrowserlessResponse:
+    def __init__(self, payload):
+        if not isinstance(payload, dict):
+            raise RuntimeError("Browserless 响应结构异常，未确认站点结果")
+        self.status_code = payload.get("status")
+        if type(self.status_code) is not int:
+            raise RuntimeError("Browserless 未返回站点 HTTP 状态，未确认站点结果")
+        self.headers = {"content-type": payload.get("contentType") or ""}
+        self.history = []
+        self._body = payload.get("body")
+
+    def json(self):
+        if not isinstance(self._body, str):
+            raise ValueError("Browserless 响应体缺失")
+        return json.loads(self._body)
+
+
+class _BrowserlessSession:
+    def __init__(self, endpoint, cookie, proxy=""):
+        if curl_requests is None:
+            raise RuntimeError("缺少 curl_cffi 依赖")
+        try:
+            url = urlsplit(endpoint)
+            valid_token = any(parse_qs(url.query).get("token", []))
+            hostname = url.hostname
+        except ValueError:
+            raise ValueError("Browserless 地址格式错误") from None
+        if (url.scheme != "https" or not hostname or url.username or url.password or
+                url.fragment or url.path.rstrip("/") != "/function" or not valid_token):
+            raise ValueError("Browserless 地址须为带 token 的 HTTPS /function 接口")
+        query = [(key, value) for key, value in parse_qsl(url.query, keep_blank_values=True)
+                 if key != "timeout"]
+        # The server's TIMEOUT upper bound may still be lower (notably on self-hosted instances).
+        query.append(("timeout", "45000"))
+        self._endpoint = urlunsplit((url.scheme, url.netloc, url.path, urlencode(query), ""))
+        self._client = curl_requests.Session(impersonate="chrome110")
+        if proxy:
+            self._client.proxies = {"http": proxy, "https": proxy}
+        self._cookies = {name: item.value for name, item in self._cookie_jar(cookie).items()}
+
+    @staticmethod
+    def _cookie_jar(cookie):
+        jar = SimpleCookie()
+        jar.load(cookie)
+        return jar
+
+    def _request(self, method, url, timeout):
+        # Only allow the two site endpoints used by the existing sign-in flow.
+        if (method, url) not in (("GET", HDHavenSign.BASE + "/api/auth/me"),
+                                 ("POST", HDHavenSign.BASE + "/api/account/checkin")):
+            raise ValueError("Browserless 请求目标不受支持")
+        script = """export default async ({ page, context }) => {
+  await page.setCookie(...context.cookies);
+  await page.goto('https://hdhaven.com/me', {waitUntil: 'domcontentloaded', timeout: 20000});
+  const result = await page.evaluate(async ({method, url}) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 20000);
+    try {
+      const response = await fetch(url, {method, credentials: 'include', signal: controller.signal});
+      return {status: response.status, contentType: response.headers.get('content-type') || '',
+              body: await response.text()};
+    } finally {
+      clearTimeout(timer);
+    }
+  }, context.request);
+  return {data: result, type: 'application/json'};
+}"""
+        cookies = [{"name": name, "value": value, "domain": "hdhaven.com", "path": "/",
+                    "secure": True, "httpOnly": name == "hdh_session"}
+                   for name, value in self._cookies.items()]
+        response = self._client.post(self._endpoint,
+                                     json={"code": script, "context": {"cookies": cookies,
+                                                                         "request": {"method": method, "url": url}}},
+                                     timeout=55)
+        if response.status_code != 200:
+            raise RuntimeError("Browserless 执行失败，站点请求结果未确认")
+        try:
+            payload = response.json()
+        except (ValueError, TypeError):
+            raise RuntimeError("Browserless 响应无法解析，站点请求结果未确认") from None
+        if isinstance(payload, dict) and "data" in payload:
+            payload = payload["data"]
+        return _BrowserlessResponse(payload)
+
+    def get(self, url, timeout=20):
+        return self._request("GET", url, timeout)
+
+    def post(self, url, timeout=20):
+        return self._request("POST", url, timeout)
+
+    def close(self):
+        self._client.close()
+
+
 class HDHavenSign(_PluginBase):
     plugin_name = "栖影自动签到"
     plugin_desc = "HDHaven 普通签到、定时执行及结果通知"
     plugin_icon = "https://raw.githubusercontent.com/JinxJie/MoviePilot-Plugins/main/icons/hdhavensign.png"
-    plugin_version = "3.0.1"
+    plugin_version = "3.0.2"
     plugin_author = "JinxJie"
     author_url = "https://github.com/JinxJie"
     plugin_config_prefix = "hdhavensign_"
@@ -36,6 +132,8 @@ class HDHavenSign(_PluginBase):
         self._notify = True
         self._use_system_proxy = True
         self._proxy = ""
+        self._use_browserless = False
+        self._browserless_url = ""
         self._lock = threading.Lock()
         self._timer = None
 
@@ -47,6 +145,8 @@ class HDHavenSign(_PluginBase):
         self._notify = bool(config.get("notify", True))
         self._use_system_proxy = bool(config.get("use_system_proxy", True))
         self._proxy = str(config.get("proxy") or "").strip()
+        self._use_browserless = bool(config.get("use_browserless", False))
+        self._browserless_url = str(config.get("browserless_url") or "").strip()
         if config.get("onlyonce"):
             # 保存配置时清除一次性开关，避免下次宿主重启再触发。
             updated = dict(config)
@@ -89,6 +189,13 @@ class HDHavenSign(_PluginBase):
         return "; ".join(f"{name}={item.value}" for name, item in jar.items())
 
     def _session(self):
+        if self._use_browserless:
+            if not self._browserless_url:
+                raise ValueError("已启用 Browserless，请填写 /function 接口地址")
+            cookie = self._parse_cookie(self._cookie)
+            proxy = self._proxy_from_settings() if self._use_system_proxy else self._proxy
+            logger.info("栖影签到网络路径：Browserless")
+            return _BrowserlessSession(self._browserless_url, cookie, proxy)
         if curl_requests is None:
             raise RuntimeError("缺少 curl_cffi 依赖")
         cookie = self._parse_cookie(self._cookie)
@@ -243,10 +350,22 @@ class HDHavenSign(_PluginBase):
             field("VTextField", "cron", "Cron（默认每天 09:30）"),
             field("VSwitch", "use_system_proxy", "使用系统代理（默认开启）"),
             field("VTextField", "proxy", "自定义代理（关闭系统代理时使用）"),
+            {"component": "VCard", "props": {"class": "mt-4 mb-3", "variant": "outlined"}, "content": [
+                {"component": "VCardTitle", "text": "Browserless 备用模式（可选）"},
+                {"component": "VCardText", "props": {"class": "pt-2"}, "content": [
+                    field("VSwitch", "use_browserless", "启用 Browserless（默认关闭）",
+                          hint="关闭时沿用现有签到路径；开启后本次请求使用 Browserless，不会在失败后自动切换或重发签到。",
+                          **{"persistent-hint": True}),
+                    field("VTextField", "browserless_url", "Browserless HTTPS /function 地址", type="password",
+                          hint="填写完整地址（含 ?token=...）；仅开启时使用，站点 Cookie 将发送给该服务，请仅使用可信服务。",
+                          **{"persistent-hint": True}),
+                ]},
+            ]},
             {"component": "VAlert", "props": {"type": "info", "variant": "tonal",
                                       "text": "登录需浏览器完成人机验证；每次先查询站点签到状态，仅明确未签到才提交请求。"}},
         ]}], {"enabled": False, "onlyonce": False, "notify": True, "cookie": "",
-              "cron": "30 9 * * *", "use_system_proxy": True, "proxy": ""})
+              "cron": "30 9 * * *", "use_system_proxy": True, "proxy": "",
+              "use_browserless": False, "browserless_url": ""})
 
     def get_page(self):
         record = self.get_data("last_result") or {}

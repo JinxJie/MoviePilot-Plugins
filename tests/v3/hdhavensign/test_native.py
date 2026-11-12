@@ -104,6 +104,140 @@ class HDHavenTests(unittest.TestCase):
         self.assertEqual(len(p.get_service()), 1)
         self.assertEqual(p.get_service()[0]["func"].__name__, "_run")
 
+    def test_browserless_off_by_default_and_missing_url(self):
+        module = load()
+        p = module.HDHavenSign()
+        p.init_plugin({"cookie": "hdh_session=placeholder", "notify": False})
+        form, defaults = p.get_form()
+        self.assertFalse(defaults["use_browserless"])
+        self.assertIn("browserless_url", str(form))
+        nodes = form[0]["content"]
+        cards = [node for node in nodes if node["component"] == "VCard"]
+        self.assertEqual(len(cards), 1)
+        card = cards[0]
+        self.assertEqual(card["props"]["class"], "mt-4 mb-3")
+        self.assertEqual(card["content"][0]["text"], "Browserless 备用模式（可选）")
+        fields = card["content"][1]["content"]
+        self.assertEqual([item["props"]["model"] for item in fields],
+                         ["use_browserless", "browserless_url"])
+        self.assertEqual(fields[1]["props"]["type"], "password")
+        self.assertTrue(fields[1]["props"]["persistent-hint"])
+        p.init_plugin({"cookie": "hdh_session=placeholder", "notify": False,
+                       "use_browserless": True})
+        self.assertFalse(p._run(manual=True)["success"])
+        self.assertIsNone(p.get_data("last_result"))
+
+    def test_browserless_fake_preflight_and_sign(self):
+        module = load()
+        calls = []
+        class FakeClient:
+            def __init__(self, impersonate):
+                self.proxies = {}
+            def post(self, endpoint, json, timeout):
+                request = json["context"]["request"]
+                calls.append(request["method"])
+                assert endpoint.endswith("/function?token=placeholder&timeout=45000")
+                assert timeout == 55
+                assert "placeholder" not in json["code"]
+                assert "AbortController" in json["code"]
+                assert json["context"]["cookies"][0]["value"] == "placeholder"
+                assert json["context"]["cookies"][0]["httpOnly"] is True
+                assert json["context"]["cookies"][0]["secure"] is True
+                if request["method"] == "GET":
+                    body = '{"success":true,"data":{"id":1,"checkin_today":false}}'
+                    status = 200
+                else:
+                    body = '{"success":true,"data":{"mode":"normal","earned":5,"points":25,"checkin_streak":1}}'
+                    status = 201
+                return Response(200, {"status": status, "contentType": "application/json", "body": body})
+            def close(self):
+                pass
+        module.curl_requests = types.SimpleNamespace(Session=FakeClient)
+        p = module.HDHavenSign()
+        p.init_plugin({"cookie": "hdh_session=placeholder", "notify": False,
+                       "use_browserless": True,
+                       "browserless_url": "https://browser.example/function?token=placeholder"})
+        self.assertTrue(p._run(manual=True)["success"])
+        self.assertEqual(calls, ["GET", "POST"])
+
+    def test_browserless_preflight_failure_and_invalid_url_never_post(self):
+        module = load()
+        module.curl_requests = types.SimpleNamespace(Session=Mock())
+        for url in ("http://browser.example/function?token=x", "https://browser.example/other?token=x",
+                    "https://browser.example/function", "https://browser.example/function?token=",
+                    "https://user:secret@browser.example/function?token=x"):
+            p = module.HDHavenSign()
+            p.init_plugin({"cookie": "hdh_session=placeholder", "notify": False,
+                           "use_browserless": True, "browserless_url": url})
+            self.assertFalse(p._run(manual=True)["success"])
+            self.assertIsNone(p.get_data("last_result"))
+        calls = []
+        class FakeClient:
+            def __init__(self, impersonate):
+                self.proxies = {}
+            def post(self, endpoint, json, timeout):
+                calls.append(json["context"]["request"]["method"])
+                return Response(200, {"status": 403, "contentType": "text/html", "body": "blocked"})
+            def close(self):
+                pass
+        module.curl_requests = types.SimpleNamespace(Session=FakeClient)
+        p = module.HDHavenSign()
+        p.init_plugin({"cookie": "hdh_session=placeholder", "notify": False,
+                       "use_browserless": True,
+                       "browserless_url": "https://browser.example/function?token=placeholder"})
+        self.assertFalse(p._run(manual=True)["success"])
+        self.assertEqual(calls, ["GET"])
+
+    def test_browserless_timeout_rechecks_status_without_reposting(self):
+        module = load()
+        calls = []
+        class FakeClient:
+            def __init__(self, impersonate):
+                self.proxies = {}
+            def post(self, endpoint, json, timeout):
+                method = json["context"]["request"]["method"]
+                calls.append(method)
+                if method == "POST":
+                    raise TimeoutError("redacted")
+                signed = calls.count("GET") > 1
+                body = {"success": True, "data": {"id": 1, "checkin_today": signed}}
+                if signed:
+                    body["data"]["last_checkin"] = datetime.now().date().isoformat()
+                return Response(200, {"data": {"status": 200, "contentType": "application/json",
+                                                "body": __import__("json").dumps(body)},
+                                      "type": "application/json"})
+            def close(self):
+                pass
+        module.curl_requests = types.SimpleNamespace(Session=FakeClient)
+        p = module.HDHavenSign()
+        p.init_plugin({"cookie": "hdh_session=placeholder", "notify": False,
+                       "use_browserless": True,
+                       "browserless_url": "https://browser.example/function?token=placeholder"})
+        self.assertFalse(p._run(manual=True)["success"])
+        self.assertEqual(p.get_data("last_result")["state"], "pending")
+        self.assertTrue(p._run(manual=True)["success"])
+        self.assertEqual(calls, ["GET", "POST", "GET"])
+
+    def test_browserless_uses_system_proxy_without_logging_secret(self):
+        module = load({"https": "http://user:secret@example:1"})
+        clients = []
+        class FakeClient:
+            def __init__(self, impersonate):
+                self.proxies = {}
+                clients.append(self)
+            def close(self):
+                pass
+        module.curl_requests = types.SimpleNamespace(Session=FakeClient)
+        p = module.HDHavenSign()
+        p.init_plugin({"cookie": "hdh_session=placeholder", "notify": False,
+                       "use_browserless": True,
+                       "browserless_url": "https://browser.example/function?token=placeholder"})
+        with patch.object(module.logger, "info") as info:
+            p._session().close()
+        self.assertEqual(clients[0].proxies["https"], "http://user:secret@example:1")
+        self.assertNotIn("secret", str(info.call_args_list))
+        self.assertNotIn("placeholder", str(info.call_args_list))
+
     def test_proxy_shapes(self):
         for proxy, expected in [({"https": "http://example:1", "http": "http://example:2"}, "http://example:1"),
                                 ({"http": "http://example:2"}, "http://example:2"),
