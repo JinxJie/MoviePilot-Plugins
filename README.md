@@ -8,11 +8,9 @@ JinxJie 的 [MoviePilot](https://github.com/jxxghp/MoviePilot) 第三方插件�
 
 | 插件 | 目录 | 版本 | 说明 |
 |------|------|------|------|
-| HHCLUB 自动抽奖 | [`plugins.v2/hhlottery`](plugins.v2/hhlottery) | 1.0.8 | 定时自动抽奖、大奖即时通知、盈亏统计、站内信清理 |
-| NodeSeek 自动签到 | [`plugins.v2/nodeseek`](plugins.v2/nodeseek) | 1.0.2 | NodeSeek 论坛每日自动签到、鸡腿收益统计、消息通知 |
-| 插件残留清理 | [`plugins.v2/pluginresidueclean`](plugins.v2/pluginresidueclean) | 1.0.1 | 风险分级、单项清理、清理后复扫、定时扫描通知，默认不自动删除 |
-| 癫影自动签到（V2） | [`plugins.v2/dian115sign`](plugins.v2/dian115sign) | 1.0.3 | 每日签到、可选签到后最大抽奖、实时积分与合并通知 |
-| 癫影自动签到（V3） | [`plugins.v3/dian115sign`](plugins.v3/dian115sign) | 3.0.0 | V3 原生接口、兼容字典系统代理，保留签到和默认关闭的抽奖功能 |
+| HHCLUB 自动抽奖（V2） | [`plugins.v2/hhlottery`](plugins.v2/hhlottery) | 1.0.8 | 定时自动抽奖、大奖通知、盈亏统计、站内信清理 |
+| NodeSeek 自动签到（V3） | [`plugins.v3/nodeseek`](plugins.v3/nodeseek) | 3.0.1 | 每日签到、鸡腿收益统计、签到记录与消息通知 |
+| 癫影自动签到（V3） | [`plugins.v3/dian115sign`](plugins.v3/dian115sign) | 3.0.0 | 普通签与运气签、可选签到后最大抽奖、实时积分 |
 | 癫影娱乐（V3） | [`plugins.v3/dian115wheel`](plugins.v3/dian115wheel) | 3.1.2 | 转盘、大富翁独立游玩，过程日志、积分护栏及结果记录 |
 | 栖影自动签到（V3） | [`plugins.v3/hdhavensign`](plugins.v3/hdhavensign) | 3.0.2 | 先核对今日签到状态；支持代理与可选 Browserless 备用模式 |
 
@@ -84,9 +82,9 @@ https://github.com/JinxJie/MoviePilot-Plugins
 </details>
 
 <details>
-<summary>2. 📌 NodeSeek 自动签到</summary>
+<summary>2. 📌 NodeSeek 自动签到（NodeSeek · V3）</summary>
 
-**v1.0.2 · 签到自动化 · NodeSeek 论坛**
+**v3.0.1 · 签到自动化 · NodeSeek 论坛**
 
 **功能：**
 NodeSeek 论坛每日自动签到，使用 curl_cffi 模拟 Chrome 浏览器指纹绕过 Cloudflare 拦截，支持鸡腿收益统计、签到历史记录和消息通知。
@@ -101,63 +99,27 @@ NodeSeek 论坛每日自动签到，使用 curl_cffi 模拟 Chrome 浏览器指�
 - 📋 签到历史记录（最近 12 条）
 - 🔔 通知：签到成功 / 今日已签到 / 签到失败 / Cookie 失效
 - ⌨️ 命令 `/nodeseek` 与 API `/nodeseek/sign` 手动签到
+- 🌐 V3 原生浏览器上下文可作为 Cookie 无效时的回退路径；支持系统代理。
 
 **使用说明：**
 1. 在 MoviePilot 插件管理中添加本仓库地址并安装插件。
 2. 浏览器登录 NodeSeek，F12 → Application → Cookies 复制 `nodeseek.com` Cookie 值，填入插件配置。
 3. 配置签到时间（默认每天 00:30；触发后会内置随机等待约 1 分钟再开始签到）。
-4. 确保安装 `curl_cffi` 依赖，否则会被 Cloudflare 拦截（插件会自动回退 requests 并提示）。
+4. V3 版本优先使用 `curl_cffi`，缺少依赖时会回退 requests 并提示；备用登录需在设置中配置账号与兼容的验证码服务。
 
 **免责声明：**
 本插件仅通过站点现有接口执行签到操作，不会修改任何站点数据。站点规则、接口或防护策略变更可能导致功能异常，请自行评估后使用；因使用本插件产生的任何问题，开发者不承担责任。
 
 **更新说明：**
-- v1.0.2：兼容只粘贴 `nodeseek.com` Cookie 值；浏览器回退携带完整会话并继承系统代理；优化备用登录诊断与多账号尝试。
-- v1.0.1：修复今日已签到状态识别，调整页面布局与设置说明。
-- v1.0.0：首发版本，支持每日定时自动签到、curl_cffi 过 Cloudflare、鸡腿收益统计、签到历史、消息通知、手动签到命令与 API。
+- v3.0.1：修复 Cookie 规范化与会话浏览器回退；浏览器继承系统代理，备用登录动态读取验证码 sitekey 并保留真实失败原因。
+- v3.0.0：新增 MoviePilot V3 原生实现，使用 app.sdk 稳定接口、托管浏览器上下文与 pyproject.toml 依赖声明。
 
 </details>
 
 <details>
-<summary>3. 🧹 插件残留清理（PluginResidueClean）</summary>
+<summary>3. 📅 癫影自动签到（Dian115Sign · V3）</summary>
 
-**v1.0.1 · 插件清理 · MoviePilot 卸载残留清理**
-
-**功能：**
-一键清理卸载后的插件残留（目录 / 数据 / 配置 / 模块缓存 / 文件夹配置），支持风险分级、单插件清理、清理后复扫与定时扫描通知，清理始终由手动触发。
-
-**标签：**
-插件清理、残留清理、手动操作、消息通知
-
-**特点：**
-- 🧹 一键清理所有「已卸载但仍有残留」的插件，一次清干净
-- 🎯 支持风险等级提示，快速识别目录、数据和配置残留
-- 🧩 支持单个插件独立清理，避免不必要的批量操作
-- 🔁 清理完成后自动复扫，显示仍存在的残留数量
-- 🔍 打开插件页面自动扫描，无需任何配置
-- 🛡️ 安全护栏：插件自身与「排除列表」中的插件永不清理
-- 📅 可选定时扫描：发现残留只发送通知，绝不自动清理
-- ✅ 已安装插件即使有残留也只展示提示，不会进入清理范围
-
-**使用说明：**
-1. 安装并打开插件页面，自动扫描当前残留。
-2. 确认列表后点「一键清理残留」，执行后页面自动刷新结果。
-3. 需要定期体检时：设置中开启「定时扫描」并配置扫描时间。
-4. 如需保护某插件，加入「排除插件 ID」配置。
-
-**免责声明：**
-清理为不可逆操作（删除插件目录、数据、配置），请确认后执行；插件不会清理自身、排除列表中的插件及仍在运行/已安装的插件。因误操作产生的任何问题，开发者不承担责任。
-
-**更新说明：**
-- v1.0.1：增加风险分级、单插件清理、清理后复扫和更详细的清理结果。
-- v1.0.0：首发版本，支持一键清理卸载残留、手动扫描、定时扫描通知与安全排除。
-
-</details>
-
-<details>
-<summary>4. 📅 癫影自动签到（Dian115Sign · V2 / V3）</summary>
-
-**V2 v1.0.3 / V3 v3.0.0 · 签到与可选转盘 · 癫影（dian115.com）**
+**v3.0.0 · 签到与可选转盘 · 癫影（dian115.com）**
 
 **功能：**
 癫影每日自动签到；可选在签到成功或今日已签到后，按站点剩余额度逐次运行付费转盘。首页展示签到状态、转盘状态与只读实时积分，通知合并展示签到和抽奖结果。使用 curl_cffi 模拟 Chrome 指纹，并以 ECDSA P-256 完成请求签名。
@@ -180,7 +142,7 @@ NodeSeek 论坛每日自动签到，使用 curl_cffi 模拟 Chrome 浏览器指�
 - 🚀 支持立即运行一次用于调试 Token 与网络；开启转盘时也会消耗积分。
 
 **使用说明：**
-1. 在 MoviePilot 插件管理中添加本仓库地址；V2 安装 `plugins.v2/dian115sign`，V3 使用原生 `plugins.v3/dian115sign`。V3 升级前请备份原配置和签到记录，安装后检查 Token、Cron、代理及「签到后最大抽奖」开关（默认关闭）。
+1. 在 MoviePilot 插件管理中添加本仓库地址，安装原生 V3 版本 `plugins.v3/dian115sign`；升级前请备份原配置和签到记录，安装后检查 Token、Cron、代理及「签到后最大抽奖」开关（默认关闭）。
 2. 浏览器登录 m.dian115.com 后按 F12 → Application → Cookies → 复制 `__Host-portal_token` 的值，填入插件配置。
 3. 配置签到时间与签到模式（默认每天 09:30，普通签）。
 4. 可开启「立即运行一次」测试；**若同时开启「签到后最大抽奖」，手动运行也将消耗积分**。请先关闭独立转盘插件的定时任务，避免双重执行。需确保环境已安装 `curl_cffi` 与 `cryptography`；转盘记录与独立插件历史不自动合并。
@@ -189,16 +151,12 @@ NodeSeek 论坛每日自动签到，使用 curl_cffi 模拟 Chrome 浏览器指�
 本插件签到使用站点现有接口；开启转盘后会发起**消耗积分**的抽奖请求，结果随机，站点规则、接口及防护策略变更可能造成账号风险。请自行评估后启用；开发者不保证中奖或承担使用后果。
 
 **更新说明：**
-- V3 v3.0.0：新增 V3 原生实现，兼容字典或对象型系统代理；保留签到与默认关闭的签到后最大抽奖，修复签到签名格式并加强付费请求保护。以下 V2 历史记录继续保留。
-- v1.0.3：集成默认关闭的签到后最大抽奖开关；逐次核对额度与积分，首页和合并通知展示转盘状态、结果及实时积分。
-- v1.0.2：补充 curl_cffi 与 cryptography 依赖声明，修复 MoviePilot V3 重装后依赖未自动安装导致无法模拟浏览器指纹的问题。
-- v1.0.1：修复浏览器指纹回退链（chrome110 优先）；Token 兼容整段 Cookie 粘贴；手动测试不再被启用开关拦截；图标改为 GitHub CDN 地址；新增系统代理开关（默认开）。
-- v1.0.0：首发版本，支持每日定时自动签到、普通签/运气签开关、Chrome 指纹过 WAF、ECDSA 请求签名、账号信息展示、签到记录、结果通知与失败重试。
+- v3.0.0：新增 V3 原生实现，兼容字典或对象型系统代理；保留签到与默认关闭的签到后最大抽奖，修复签到签名格式并加强付费请求保护。
 
 </details>
 
 <details>
-<summary>5. 🎲 癫影娱乐（Dian115Wheel · V3）</summary>
+<summary>4. 🎲 癫影娱乐（Dian115Wheel · V3）</summary>
 
 **v3.1.2 · 站点自动化 · 癫影（m.dian115.com）**
 
@@ -236,7 +194,7 @@ NodeSeek 论坛每日自动签到，使用 curl_cffi 模拟 Chrome 浏览器指�
 </details>
 
 <details>
-<summary>6. 🌙 栖影自动签到（HDHavenSign · V3）</summary>
+<summary>5. 🌙 栖影自动签到（HDHavenSign · V3）</summary>
 
 **v3.0.2 · 签到自动化 · 栖影（hdhaven.com）**
 
