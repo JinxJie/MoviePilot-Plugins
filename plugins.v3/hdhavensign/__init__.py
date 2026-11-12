@@ -116,13 +116,35 @@ class HDHavenSign(_PluginBase):
     plugin_name = "栖影自动签到"
     plugin_desc = "HDHaven 普通签到、定时执行及结果通知"
     plugin_icon = "https://raw.githubusercontent.com/JinxJie/MoviePilot-Plugins/main/icons/hdhavensign.png"
-    plugin_version = "3.0.2"
+    plugin_version = "3.0.3"
     plugin_author = "JinxJie"
     author_url = "https://github.com/JinxJie"
     plugin_config_prefix = "hdhavensign_"
     plugin_order = 0
     auth_level = 2
     BASE = "https://hdhaven.com"
+    _SAFE_ERRORS = frozenset({
+        "缺少 curl_cffi 依赖", "Browserless 地址格式错误",
+        "Browserless 地址须为带 token 的 HTTPS /function 接口",
+        "Browserless 请求目标不受支持", "Browserless 执行失败，站点请求结果未确认",
+        "Browserless 响应无法解析，站点请求结果未确认",
+        "Browserless 响应结构异常，未确认站点结果",
+        "Browserless 未返回站点 HTTP 状态，未确认站点结果",
+        "Browserless 响应体缺失", "请填写站点登录会话 Cookie",
+        "Cookie 格式错误", "缺少栖影登录会话 Cookie",
+        "已启用 Browserless，请填写 /function 接口地址",
+        "站点返回非 JSON，可能遭遇人机验证；请人工核对",
+        "站点 JSON 响应无法解析；请人工核对",
+        "站点响应结构异常；请人工核对",
+        "签到成功响应结构异常；请人工核对",
+        "签到结果数字字段缺失；请人工核对",
+        "签到响应未确认，请在站点核对；再次运行会先查询站点今日签到状态",
+        "未配置栖影登录会话 Cookie", "会话未通过登录预检，请重新登录并更新 Cookie",
+        "站点今日签到状态无法确认，未发送签到请求",
+        "站点确认今日已签到，但本地记录保存失败",
+        "待核对标记保存失败，未发送签到请求",
+        "签到已返回成功，但记录保存失败，请人工核对",
+    })
 
     def __init__(self):
         super().__init__()
@@ -248,6 +270,58 @@ class HDHavenSign(_PluginBase):
             except Exception:
                 logger.warning("栖影签到通知发送失败")
 
+    def _send_notify(self, status, date, result=None, reason=""):
+        """Use site-confirmed numbers only; an uncertain POST is not a failed sign-in."""
+        result = result or {}
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        def value(key):
+            item = result.get(key)
+            return str(item) if type(item) is int else "未提供"
+
+        if status == "success":
+            title = f"栖影签到成功（{date}）"
+            award = result.get("earned")
+            earned = f"{award:+d}" if type(award) is int else "未提供"
+            lines = ["✅ 签到模式：普通签", f"🧧 获得积分：{earned}",
+                     f"💰 当前积分：{value('points')}", f"🔥 连续签到：{value('streak')} 天"]
+        elif status == "already":
+            title = f"栖影已签到（{date}）"
+            lines = ["📅 今日已完成签到，无需重复操作", "",
+                     f"💰 当前积分：{value('points')}", f"🔥 连续签到：{value('streak')} 天"]
+        else:
+            uncertain = status == "pending"
+            title = f"栖影签到{'待核对' if uncertain else '未完成'}（{date}）"
+            lines = [f"⚠️ {'结果待核对' if uncertain else '未完成原因'}：{reason or '未知'}", "",
+                     "🔎 请先在站点核对签到状态，勿直接重复提交" if uncertain else
+                     "🔎 请检查 Cookie、网络及站点状态"]
+        self._notice(title, "\n".join([*lines, "", f"🕒 {now}"]))
+
+    @staticmethod
+    def _history_rows(records):
+        """Keep the most complete confirmed row per date, newest thirty days first."""
+        by_date = {}
+        for row in records:
+            if not isinstance(row, dict) or row.get("state") != "success":
+                continue
+            date = row.get("date")
+            if not isinstance(date, str) or not date:
+                continue
+            previous = by_date.get(date)
+            count = lambda item: sum(type(item.get(key)) is int for key in ("earned", "points", "streak"))
+            if previous is None or count(row) >= count(previous):
+                by_date[date] = row
+        return [by_date[date] for date in sorted(by_date, reverse=True)[:30]]
+
+    def _remember_result(self, result):
+        """Best-effort display history; never change a confirmed sign-in outcome."""
+        try:
+            records = self.get_data("sign_records") or []
+            if not isinstance(records, list):
+                records = []
+            self.save_data("sign_records", list(reversed(self._history_rows([*records, result]))))
+        except Exception:
+            logger.warning("栖影签到记录保存失败，不影响已确认的签到结果")
+
     def _run(self, manual=False):
         if not manual and not self._enabled:
             return {"success": False, "message": "定时签到未启用"}
@@ -283,10 +357,20 @@ class HDHavenSign(_PluginBase):
                                              (not status and last_checkin == today))):
                 raise RuntimeError("站点今日签到状态无法确认，未发送签到请求")
             if status:
-                self.save_data("last_result", {"date": today, "state": "success"})
+                previous = self.get_data("last_result") or {}
+                confirmed = {"date": today, "state": "success"}
+                if isinstance(previous, dict) and previous.get("date") == today and previous.get("state") == "success":
+                    confirmed.update({key: previous[key] for key in ("earned", "points", "streak")
+                                      if type(previous.get(key)) is int})
+                self.save_data("last_result", confirmed)
                 saved = self.get_data("last_result") or {}
                 if saved.get("date") != today or saved.get("state") != "success":
                     raise RuntimeError("站点确认今日已签到，但本地记录保存失败")
+                self._remember_result({**confirmed, "time": datetime.now().strftime("%H:%M:%S")})
+                account_data = account["data"]
+                self._send_notify("already", today, {
+                    "points": account_data.get("points"),
+                    "streak": account_data.get("checkin_streak")})
                 logger.info("栖影签到：站点确认今日已签到，跳过提交")
                 return {"success": True, "message": "站点确认今日已签到，不重复提交"}
             logger.info("栖影签到：站点确认今日未签到，准备提交")
@@ -307,13 +391,25 @@ class HDHavenSign(_PluginBase):
             saved = self.get_data("last_result") or {}
             if saved.get("date") != today or saved.get("state") != "success":
                 raise RuntimeError("签到已返回成功，但记录保存失败，请人工核对")
-            self._notice("栖影签到成功", f"获得积分：{result['earned']}；当前积分：{result['points']}；连续签到：{result['streak']}")
+            self._remember_result({"date": today, **result, "time": datetime.now().strftime("%H:%M:%S")})
+            self._send_notify("success", today, result)
             return {"success": True, "message": "签到成功", "data": result}
         except Exception as exc:
             # 不输出网络异常原文：可能含 Cookie/代理地址等敏感字段。
             logger.warning("栖影签到未完成：阶段=%s，异常类型=%s", stage, type(exc).__name__)
-            message = str(exc) if type(exc) in (RuntimeError, ValueError) else "请求或存储异常，结果可能已提交；请人工核对，勿重试"
-            self._notice("栖影签到待核对", message)
+            detail = str(exc) if type(exc) in (RuntimeError, ValueError) else ""
+            message = detail if detail in self._SAFE_ERRORS else (
+                "请求或存储异常，结果可能已提交；请人工核对，勿重试"
+                if stage in ("签到请求", "结果保存") else "请求或存储异常；请检查 Cookie、网络及站点状态")
+            try:
+                current = self.get_data("last_result") or {}
+            except Exception:
+                current = {}
+            uncertain = stage in ("签到请求", "结果保存") or (
+                isinstance(current, dict) and current.get("date") == datetime.now().date().isoformat()
+                and current.get("state") == "pending")
+            self._send_notify("pending" if uncertain else "incomplete",
+                              datetime.now().date().isoformat(), reason=message)
             return {"success": False, "message": message}
         finally:
             if session is not None:
@@ -369,11 +465,102 @@ class HDHavenSign(_PluginBase):
 
     def get_page(self):
         record = self.get_data("last_result") or {}
-        state = {"success": "签到成功", "pending": "结果待核对"}.get(str(record.get("state") or ""), "尚无记录")
-        return [{"component": "VCard", "props": {"class": "ma-2"}, "content": [
-            {"component": "VCardTitle", "text": "栖影自动签到"},
-            {"component": "VCardText", "text": f"最近状态：{state}；日期：{record.get('date', '-')}"},
+        if not isinstance(record, dict):
+            record = {}
+        records = self.get_data("sign_records") or []
+        if not isinstance(records, list):
+            records = []
+        if record.get("state") == "success" and record.get("date"):
+            records.append(record)
+        records = self._history_rows(records)
+
+        account = None
+        if self._cookie:
+            session = None
+            try:
+                session = self._session()
+                response = session.get(self.BASE + "/api/auth/me", timeout=20)
+                payload = self._decode(response)
+                if response.status_code == 200 and payload.get("success") is True and isinstance(payload.get("data"), dict):
+                    account = payload["data"]
+            except Exception:
+                logger.warning("栖影首页只读账户查询失败")
+            finally:
+                if session is not None:
+                    try:
+                        session.close()
+                    except Exception:
+                        pass
+
+        def number(value, suffix=""):
+            return f"{value:,}{suffix}" if type(value) is int else "未提供"
+
+        def kpi(icon, label, value, color, note):
+            return {"component": "VCard", "props": {"variant": "tonal", "class": "h-100"}, "content": [
+                {"component": "VCardText", "props": {"class": "text-center pa-3"}, "content": [
+                    {"component": "div", "props": {"class": "text-h5 mb-1"}, "text": icon},
+                    {"component": "div", "props": {
+                        "class": f"text-h6 font-weight-bold text-{color}",
+                        "style": "white-space:normal;overflow-wrap:anywhere;line-height:1.2",
+                    }, "text": value},
+                    {"component": "div", "props": {"class": "text-caption text-medium-emphasis"}, "text": label},
+                    {"component": "div", "props": {"class": "text-caption text-medium-emphasis"}, "text": note},
+                ]},
+            ]}
+
+        latest = records[0] if records else {}
+        nickname = (account or {}).get("nickname") or (account or {}).get("username")
+        points = (account or {}).get("points")
+        streak = (account or {}).get("checkin_streak")
+        today = datetime.now().date().isoformat()
+        signed = (account or {}).get("checkin_today")
+        if record.get("date") == today and record.get("state") == "pending":
+            today_state = "结果待核对（站点显示已签到）" if signed is True else "结果待核对"
+        elif signed is True:
+            today_state = "已签到"
+        elif signed is False:
+            today_state = "未签到"
+        else:
+            today_state = "无法确认"
+        tiles = [
+            ("👤", "账号", str(nickname or "未提供"), "primary", "站点只读账户信息"),
+            ("💰", "当前积分", number(points) if account else "获取失败", "info", "站点实时数据"),
+            ("🔥", "连续签到", number(streak, " 天") if type(streak) is int else number(latest.get("streak"), " 天"),
+             "success", "站点实时数据" if type(streak) is int else "最近一次确认的本地结果"),
+            ("🧧", "本地累计获得", number(sum(row["earned"] for row in records if type(row.get("earned")) is int))
+             if any(type(row.get("earned")) is int for row in records) else "未提供",
+             "warning", f"本地有积分记录 {sum(type(row.get('earned')) is int for row in records)} 天"),
+        ]
+        page = [{"component": "VRow", "props": {"dense": True}, "content": [
+            {"component": "VCol", "props": {"cols": 6, "md": 6}, "content": [kpi(*tile)]}
+            for tile in tiles
         ]}]
+        page.append({"component": "VCard", "props": {"variant": "tonal", "class": "ma-2"}, "content": [
+            {"component": "VCardTitle", "text": "📅 今日签到"},
+            {"component": "VCardText", "text": f"{today_state} · 最近记录：{record.get('date') or '—'}"},
+        ]})
+        headers = ("日期", "时间", "获得积分", "签到后积分", "连续签到", "状态")
+        rows = [{"component": "tr", "content": [
+            {"component": "td", "text": text} for text in (
+                str(row.get("date") or "—"), str(row.get("time") or "—"),
+                number(row.get("earned")), number(row.get("points")),
+                number(row.get("streak"), " 天"), "已签到",
+            )
+        ]} for row in records[:30]]
+        table = [{"component": "div", "props": {"style": "overflow-x:auto;max-width:100%"}, "content": [{
+            "component": "VTable", "props": {"density": "compact", "style": "min-width:680px"}, "content": [
+                {"component": "thead", "content": [{"component": "tr", "content": [
+                    {"component": "th", "props": {"class": "text-no-wrap"}, "text": title} for title in headers
+                ]}]},
+                {"component": "tbody", "content": rows},
+            ],
+        }]}] if rows else [{"component": "VAlert", "props": {
+            "type": "info", "variant": "tonal", "text": "暂无本地签到记录"}}]
+        page.append({"component": "VCard", "props": {"variant": "tonal", "class": "ma-2"}, "content": [
+            {"component": "VCardTitle", "text": "📋 签到记录（最近 30 条）"},
+            {"component": "VCardText", "props": {"class": "pa-2"}, "content": table},
+        ]})
+        return page
 
     def stop_service(self):
         if self._timer is not None:
