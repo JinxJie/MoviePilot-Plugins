@@ -264,13 +264,23 @@ class Dian115Wheel(_PluginBase):
         return points
 
     @staticmethod
-    def _notification_text(results, balance, error=""):
-        prizes = [str(row["label"]) for row in results]
-        prize_lines = ["  ｜  ".join(prizes[i:i + 2]) for i in range(0, len(prizes), 2)]
-        lines = [f"🎲 本轮抽奖：{len(results)} 次  ｜  消耗积分：{sum(int(r['cost']) for r in results)}",
-                 f"💰 当前积分：{balance if balance is not None else '获取失败'}", "", "🎁 奖品结果", *prize_lines]
+    def _notification_text(results, balance, error="", *, game="wheel", planned=None,
+                           used_today=None, max_plays=None):
+        from collections import Counter
+        names = Counter(str(row["label"]) for row in results)
+        kind = "转盘" if game == "wheel" else "大富翁"
+        verb = "连抽" if game == "wheel" else "连玩"
+        planned = len(results) if planned is None else planned
+        quota = (f"{used_today}/{max_plays}" if used_today is not None and max_plays is not None
+                 else "获取失败")
+        earned = sum(int(row["points"]) for row in results)
+        lines = [f"{'🎡' if game == 'wheel' else '🎲'} {kind} {planned}{verb}完成（实际 {len(results)} 次）",
+                 "🎁 中奖汇总：", *(f"• {name} ×{count}" for name, count in names.items()),
+                 f"本次消耗：{sum(int(row['cost']) for row in results)} 积分",
+                 f"积分奖励：{earned:+d}", f"今日已用：{quota}",
+                 f"💰 当前余额：{balance if balance is not None else '获取失败'}"]
         if error:
-            lines.extend(["", f"⚠️ 提前结束：{error}"])
+            lines.append(f"⚠️ 提前结束：{error}")
         return "\n".join(lines)
 
     def _run(self):
@@ -328,6 +338,7 @@ class Dian115Wheel(_PluginBase):
         error = ""
         unsafe_stop = False
         initial_remaining = None
+        progress = None
         logger.info("癫影转盘开始核对站点额度和积分")
         try:
             if self.get_data("wheel_pending") == datetime.now().date().isoformat():
@@ -400,17 +411,30 @@ class Dian115Wheel(_PluginBase):
             error = str(exc)[:200] if isinstance(exc, RuntimeError) else type(exc).__name__
             logger.warning(f"癫影转盘执行中断：{error}")
         if results and self._notify:
+            balance = None
+            used_today = max_plays = None
             try:
                 if "rate_limited" in error:
-                    raise RuntimeError("站点限流，本轮不再查询积分")
+                    raise RuntimeError("站点限流，本轮不再查询积分或次数")
                 self._pace_after_paid()
                 balance = self._current_points()
             except Exception:
-                balance = None
                 logger.warning("癫影转盘通知读取当前积分失败")
+            if "rate_limited" not in error:
+                try:
+                    wheel_final = (self._request("GET", self.STATUS).get("items") or {}).get("daily_wheel") or {}
+                    used_today = self._nonnegative_int(wheel_final.get("used_today"), "转盘已用次数")
+                    max_plays = self._nonnegative_int(wheel_final.get("max_plays"), "转盘每日额度")
+                    if progress is not None:
+                        used_today = max(used_today, progress["baseline"] + progress["count"])
+                except Exception:
+                    logger.warning("癫影转盘通知读取今日次数失败")
+                    used_today = max_plays = None
+            planned = self._max_spins if self._spin_mode == "custom" else initial_remaining
             try:
                 self.post_message(mtype=NotificationType.Plugin, title="癫影娱乐 · 转盘完成",
-                                  text=self._notification_text(results, balance, error))
+                                  text=self._notification_text(results, balance, error, game="wheel",
+                                                               planned=planned, used_today=used_today, max_plays=max_plays))
             except Exception:
                 logger.warning("癫影转盘通知发送失败")
         logger.info(f"癫影转盘本轮结束：完成 {len(results)} 次" + ("，提前结束" if error else ""))
@@ -495,7 +519,7 @@ class Dian115Wheel(_PluginBase):
         """独立玩法；只信任站点状态的额度和成本，不重发不确定的消费请求。"""
         if not self._token:
             return {"code": 1, "msg": "请先填写登录 Token"}
-        results, error, initial_remaining = [], "", None
+        results, error, initial_remaining, progress = [], "", None, None
         logger.info("癫影大富翁开始核对站点额度和积分")
         try:
             if self._monopoly_pending():
@@ -576,16 +600,30 @@ class Dian115Wheel(_PluginBase):
             error = str(exc)[:200] if isinstance(exc, RuntimeError) else type(exc).__name__
             logger.warning(f"癫影大富翁执行中断：{error}")
         if results and self._notify:
+            balance = None
+            used_today = max_plays = None
             try:
                 if "rate_limited" in error:
-                    raise RuntimeError("站点限流，本轮不再查询积分")
+                    raise RuntimeError("站点限流，本轮不再查询积分或次数")
                 self._pace_after_paid()
                 balance = self._current_points()
             except Exception:
-                balance = None
+                logger.warning("癫影大富翁通知读取当前积分失败")
+            if "rate_limited" not in error:
+                try:
+                    game_final = (self._request("GET", self.STATUS).get("items") or {}).get("monopoly") or {}
+                    used_today = self._nonnegative_int(game_final.get("used_today"), "已用次数")
+                    max_plays = self._nonnegative_int(game_final.get("max_plays"), "每日额度")
+                    if progress is not None:
+                        used_today = max(used_today, progress["baseline"] + progress["count"])
+                except Exception:
+                    logger.warning("癫影大富翁通知读取今日次数失败")
+                    used_today = max_plays = None
+            planned = self._monopoly_max_spins if self._monopoly_spin_mode == "custom" else initial_remaining
             try:
                 self.post_message(mtype=NotificationType.Plugin, title="癫影娱乐 · 大富翁完成",
-                                  text=self._notification_text(results, balance, error).replace("本轮抽奖", "本轮游玩"))
+                                  text=self._notification_text(results, balance, error, game="monopoly",
+                                                               planned=planned, used_today=used_today, max_plays=max_plays))
             except Exception:
                 logger.warning("癫影大富翁通知发送失败")
         logger.info(f"癫影大富翁本轮结束：完成 {len(results)} 次" + ("，提前结束" if error else ""))

@@ -257,7 +257,7 @@ class WheelTests(unittest.TestCase):
             self.assertEqual(len(p._run()["data"]), 1)
         jitter.assert_called_once_with(15.0, 25.0)
         self.assertEqual([t for m, path, t in calls if path == p.ME], [100.0, 118.0])
-        self.assertIn("当前积分：100", p.notices[0]["text"])
+        self.assertIn("当前余额：100", p.notices[0]["text"])
 
     def test_rate_limited_notification_skips_balance_read(self):
         for game in ("wheel", "monopoly"):
@@ -285,7 +285,7 @@ class WheelTests(unittest.TestCase):
                     result = p._run()
                 self.assertEqual(len(result["data"]), 1)
                 self.assertEqual(calls.count(("GET", p.ME)), 2)
-                self.assertIn("当前积分：获取失败", p.notices[0]["text"])
+                self.assertIn("当前余额：获取失败", p.notices[0]["text"])
                 self.assertIn("rate_limited", p.notices[0]["text"])
 
     def test_system_proxy_dict_is_used_by_http_session(self):
@@ -595,6 +595,28 @@ class WheelTests(unittest.TestCase):
         page = p.get_page()
         self.assertEqual(page[0]["content"][0]["content"][0]["content"][0]["content"][0]["text"], "获取失败")
 
+    def test_summary_template_groups_prizes_in_first_seen_order(self):
+        p = self.plugin
+        rows = ([{"label": "+5 积分", "points": 5, "cost": 5}] * 10
+                + [{"label": "+10 积分", "points": 10, "cost": 5}] * 4
+                + [{"label": "+3 积分", "points": 3, "cost": 5}] * 3
+                + [{"label": "谢谢参与", "points": 0, "cost": 5}] * 3)
+        expected = ("🎡 转盘 20连抽完成（实际 20 次）\n🎁 中奖汇总：\n"
+                    "• +5 积分 ×10\n• +10 积分 ×4\n• +3 积分 ×3\n• 谢谢参与 ×3\n"
+                    "本次消耗：100 积分\n积分奖励：+99\n今日已用：20/20\n💰 当前余额：1046")
+        self.assertEqual(p._notification_text(rows, 1046, "", game="wheel", planned=20, used_today=20, max_plays=20), expected)
+
+    def test_monopoly_template_signed_reward_and_unknown_quota(self):
+        rows = [{"label": "大富翁奖励 -3 积分", "points": -3, "cost": 7},
+                {"label": "大富翁奖励 -3 积分", "points": -3, "cost": 7}]
+        text = self.plugin._notification_text(rows, None, "站点暂停", game="monopoly", planned=3)
+        self.assertIn("🎲 大富翁 3连玩完成（实际 2 次）", text)
+        self.assertIn("• 大富翁奖励 -3 积分 ×2", text)
+        self.assertIn("积分奖励：-6", text)
+        self.assertIn("今日已用：获取失败", text)
+        self.assertIn("💰 当前余额：获取失败", text)
+        self.assertIn("⚠️ 提前结束：站点暂停", text)
+
     def test_notification_pairs_prizes_and_shows_balance(self):
         p = self.plugin
         p._notify = True
@@ -614,8 +636,9 @@ class WheelTests(unittest.TestCase):
         self.assertEqual(len(p.notices), 1)
         self.assertEqual(p.notices[0]["title"], "癫影娱乐 · 转盘完成")
         self.assertEqual(p.notices[0]["text"],
-                         "🎲 本轮抽奖：3 次  ｜  消耗积分：15\n💰 当前积分：91\n\n"
-                         "🎁 奖品结果\n3 积分  ｜  5 积分\n谢谢参与")
+                         "🎡 转盘 3连抽完成（实际 3 次）\n🎁 中奖汇总：\n"
+                         "• 3 积分 ×1\n• 5 积分 ×1\n• 谢谢参与 ×1\n"
+                         "本次消耗：15 积分\n积分奖励：+0\n今日已用：3/20\n💰 当前余额：91")
 
     def test_notification_balance_failure_is_explicit_and_stop_reason_retained(self):
         p = self.plugin
@@ -636,7 +659,7 @@ class WheelTests(unittest.TestCase):
         p._request = fake
         p._run()
         self.assertEqual(calls.count(("POST", p.WHEEL)), 1)
-        self.assertIn("💰 当前积分：获取失败", p.notices[0]["text"])
+        self.assertIn("💰 当前余额：获取失败", p.notices[0]["text"])
         self.assertIn("⚠️ 提前结束：站点暂停", p.notices[0]["text"])
 
     def test_invalid_points_are_not_presented_as_balance(self):
@@ -1287,7 +1310,7 @@ class MonopolyTests(unittest.TestCase):
             return self.fake(method, path, **kw)
         self.p._request = fake
         self.p._run()
-        self.assertIn("当前积分：16", self.p.notices[0]["text"])
+        self.assertIn("当前余额：16", self.p.notices[0]["text"])
         self.assertIn("大富翁奖励 3 积分", self.p.notices[0]["text"])
 
 
