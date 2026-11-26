@@ -62,7 +62,7 @@ def test_native_lifecycle_and_existing_form():
     with patch.dict(sys.modules, {**mod._test_modules, mod.__name__: mod}):
         form, defaults = plugin.get_form()
     assert form and defaults["maximum_wheel"] is False
-    assert plugin.plugin_version == "3.0.0"
+    assert plugin.plugin_version == "3.0.1"
     assert plugin.get_state() is False
     assert plugin.get_service() == []
     assert plugin.get_command()[0]["event"] == "plugin"
@@ -191,3 +191,204 @@ def test_system_proxy_applied_to_http_session_for_both_shapes():
             session = plugin._http()
         expected = mod.Dian115Sign._system_proxy()
         assert session.proxies == {"http": expected, "https": expected}
+
+
+def test_rate_limit_stops_and_keeps_guard():
+    plugin = load().Dian115Sign()
+    calls = []
+    used = [0]
+    def request(method, path, retry=True):
+        calls.append(method)
+        if path.endswith('/games/status'):
+            return {'items': {'daily_wheel': {'used_today': used[0], 'max_plays': 20, 'cost': 5}}}
+        if path.endswith('/me'):
+            return {'user': {'points': 100}}
+        if used[0] == 0:
+            used[0] = 1
+            return {'prize': {'label': '+3 积分', 'points': 3}}
+        raise RuntimeError('站点明确拒绝本次抽奖；站点接口失败：HTTP 429，代码 rate_limited')
+    plugin._wheel_request = request
+    with patch.object(plugin, '_wheel_pace') as pace:
+        result = plugin._wheel_run()
+    assert pace.call_count >= 2
+    assert calls.count('POST') == 2
+    assert len(result['results']) == 1
+    assert result['used_today'] is None and 'rate_limited' in result['error']
+    assert plugin.get_data('dian115_wheel_last')['uncertain'] is True
+    plugin._wheel_run()
+    assert calls.count('POST') == 2
+
+
+def test_cross_day_pending_stays_blocked():
+    plugin = load().Dian115Sign()
+    plugin.save_data('dian115_wheel_last', {'date': '2020-01-01', 'uncertain': True})
+    plugin._wheel_request = lambda *a, **k: (_ for _ in ()).throw(AssertionError('unexpected request'))
+    assert plugin._wheel_run()['results'] == []
+
+
+def test_unknown_paid_result_remains_blocked_across_days():
+    plugin = load().Dian115Sign()
+    plugin.save_data('dian115_wheel_last', {'date': '2020-01-01', 'uncertain': True,
+                                           'used_before': 1, 'points_before': 100})
+    calls = []
+    plugin._wheel_request = lambda *a, **k: calls.append((a, k))
+    result = plugin._wheel_run()
+    assert result['results'] == [] and '待核对' in result['error']
+    assert calls == []
+    assert plugin.get_data('dian115_wheel_last')['uncertain'] is True
+
+
+def test_http_rate_limit_parser_distinguishes_known_rejection_from_unknown():
+    plugin = load().Dian115Sign()
+    plugin._wheel_bootstrap = lambda *a, **k: None
+    plugin._wheel_headers = lambda *a, **k: {}
+    class Response:
+        status_code = 429
+        def json(self):
+            return {'code': 'rate_limited'}
+    plugin._http = lambda: types.SimpleNamespace(request=lambda *a, **k: Response())
+    try:
+        plugin._wheel_request('POST', '/api/portal/lottery/wheel')
+        assert False, 'rate limit must raise'
+    except RuntimeError as exc:
+        assert str(exc).startswith('站点明确拒绝本次抽奖；')
+    Response.json = lambda self: {'code': 'server_error'}
+    try:
+        plugin._wheel_request('POST', '/api/portal/lottery/wheel')
+        assert False, 'unknown failure must raise'
+    except RuntimeError as exc:
+        assert str(exc).startswith('抽奖 POST 结果不明')
+
+
+def test_reconciliation_failure_preserves_marker_without_paid_post():
+    plugin = load().Dian115Sign()
+    today = __import__('datetime').date.today().isoformat()
+    marker = {'date': today, 'uncertain': True, 'rejected': 'rate_limited',
+              'used_before': 17, 'points_before': 100}
+    plugin.save_data('dian115_wheel_last', marker)
+    calls = []
+    def request(method, path, retry=True):
+        calls.append(method)
+        if path.endswith('/games/status'):
+            return {'items': {'daily_wheel': {'used_today': 18}}}
+        return {'user': {'points': 100}}
+    plugin._wheel_request = request
+    with patch.object(plugin, '_wheel_pace'):
+        result = plugin._wheel_run()
+    assert '不一致' in result['error']
+    assert calls == ['GET', 'GET']
+    assert plugin.get_data('dian115_wheel_last') == marker
+
+
+def test_rate_limit_notification_format_and_no_balance_get():
+    plugin = load().Dian115Sign()
+    plugin._token = 'fake'
+    plugin._maximum_wheel = True
+    plugin._notify = True
+    plugin._retry = 0
+    plugin._fetch_me = lambda: (_ for _ in ()).throw(AssertionError('GET after limit'))
+    plugin._do_sign = lambda manual=False: {'ok': True, 'date': '2026-11-26', 'award': 4}
+    plugin._wheel_run = lambda: {'results': [{'label': '+5 积分', 'points': 5, 'cost': 5},
+                                              {'label': '+3 积分', 'points': 3, 'cost': 5},
+                                              {'label': '+5 积分', 'points': 5, 'cost': 5}],
+                                 'planned': 20, 'used_today': None, 'max_plays': None,
+                                 'error': '站点限流（rate_limited），本轮停止；不自动重试', 'status': '提前结束'}
+    plugin._sign_job(manual=True)
+    text = plugin.notices[0]['text']
+    assert plugin.notices[0]['title'] == '癫影签到成功（2026-11-26）'
+    assert '转盘计划 20 次，实际 3 次' in text
+    assert '• +5 积分 ×2\n• +3 积分 ×1' in text
+    assert '本次消耗：15 积分\n积分奖励：+13' in text
+    assert '今日已用：获取失败\n💰 当前余额：获取失败' in text
+    assert text.endswith('⚠️ 提前结束：站点限流（rate_limited），本轮停止；不自动重试')
+
+
+def test_rejection_reconciliation_only_reads_and_clears_marker():
+    plugin = load().Dian115Sign()
+    today = __import__('datetime').date.today().isoformat()
+    plugin.save_data('dian115_wheel_last', {'date': today, 'uncertain': True, 'rejected': 'rate_limited',
+                                           'used_before': 17, 'points_before': 100})
+    calls = []
+    def request(method, path, retry=True):
+        calls.append((method, path))
+        if path.endswith('/games/status'):
+            return {'items': {'daily_wheel': {'used_today': 17, 'max_plays': 20}}}
+        return {'user': {'points': 100}}
+    plugin._wheel_request = request
+    with patch.object(plugin, '_wheel_pace'):
+        result = plugin._wheel_run()
+    assert result['results'] == [] and '未补抽' in result['error']
+    assert len(calls) == 2 and all(method == 'GET' for method, _ in calls)
+    assert plugin.get_data('dian115_wheel_last')['uncertain'] is False
+
+
+def test_stale_site_counter_cannot_exceed_local_daily_progress_across_runs():
+    plugin = load().Dian115Sign()
+    calls = []
+    def request(method, path, retry=True):
+        calls.append(method)
+        if path.endswith('/games/status'):
+            return {'items': {'daily_wheel': {'used_today': 0, 'max_plays': 1, 'cost': 5}}}
+        if path.endswith('/me'):
+            return {'user': {'points': 100}}
+        return {'prize': {'label': '+3 积分', 'points': 3}}
+    plugin._wheel_request = request
+    with patch.object(plugin, '_wheel_pace'):
+        assert len(plugin._wheel_run()['results']) == 1
+        assert plugin._wheel_run()['results'] == []
+    assert calls.count('POST') == 1
+
+
+def test_stale_site_counter_two_successes_still_capped_across_runs():
+    plugin = load().Dian115Sign()
+    calls = []
+    def request(method, path, retry=True):
+        calls.append(method)
+        if path.endswith('/games/status'):
+            return {'items': {'daily_wheel': {'used_today': 0, 'max_plays': 2, 'cost': 5}}}
+        if path.endswith('/me'):
+            return {'user': {'points': 100}}
+        return {'prize': {'label': '+3 积分', 'points': 3}}
+    plugin._wheel_request = request
+    with patch.object(plugin, '_wheel_pace'):
+        assert len(plugin._wheel_run()['results']) == 2
+        assert plugin._wheel_run()['results'] == []
+    assert calls.count('POST') == 2
+
+
+def test_cooldown_storage_failure_prevents_paid_post():
+    plugin = load().Dian115Sign()
+    calls = []
+    def request(method, path, retry=True):
+        calls.append(method)
+        if path.endswith('/games/status'):
+            return {'items': {'daily_wheel': {'used_today': 0, 'max_plays': 1, 'cost': 5}}}
+        return {'user': {'points': 100}}
+    plugin._wheel_request = request
+    original = plugin.save_data
+    def save(key, value):
+        if key == 'dian115_wheel_paid_at':
+            raise RuntimeError('cooldown storage failure')
+        original(key, value)
+    plugin.save_data = save
+    result = plugin._wheel_run()
+    assert 'cooldown storage failure' in result['error']
+    assert 'POST' not in calls
+    assert plugin.get_data('dian115_wheel_last')['uncertain'] is True
+
+
+def test_success_notification_final_quota_get_failure_is_not_stale():
+    plugin = load().Dian115Sign()
+    plugin._token = 'fake'
+    plugin._maximum_wheel = True
+    plugin._notify = True
+    plugin._retry = 0
+    plugin._do_sign = lambda manual=False: {'ok': True, 'date': '2026-11-26', 'award': 4}
+    plugin._wheel_run = lambda: {'status': '完成', 'results': [{'label': '+3 积分', 'points': 3, 'cost': 5}],
+                                 'planned': 1, 'used_today': 1, 'max_plays': 20, 'confirmed_used': 1, 'error': ''}
+    plugin._fetch_me = lambda: {'points': 98}
+    plugin._wheel_request = lambda *a, **k: (_ for _ in ()).throw(RuntimeError('GET failed'))
+    with patch.object(plugin, '_wheel_pace'):
+        plugin._sign_job(manual=True)
+    text = plugin.notices[0]['text']
+    assert '今日已用：获取失败' in text and '💰 当前余额：98' in text

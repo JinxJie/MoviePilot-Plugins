@@ -15,6 +15,8 @@ import os
 import time
 import uuid
 import threading
+import random
+from collections import Counter
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -52,7 +54,7 @@ class Dian115Sign(_PluginBase):
     plugin_name = "癫影自动签到"
     plugin_desc = "癫影每日自动签到 · 普通签/运气签 · 可选签到后最大抽奖 · 积分统计和结果通知"
     plugin_icon = "https://raw.githubusercontent.com/JinxJie/MoviePilot-Plugins/main/icons/dian115sign.png"
-    plugin_version = "3.0.0"
+    plugin_version = "3.0.1"
     plugin_author = "JinxJie"
     author_url = "https://github.com/JinxJie"
     plugin_config_prefix = "dian115sign_"
@@ -870,7 +872,8 @@ class Dian115Sign(_PluginBase):
             return self._wheel_request(method, path, retry=False)
         if response.status_code >= 400 or data.get("code") not in (None, "ok"):
             code = str(data.get("code") or "")
-            prefix = "抽奖 POST 结果不明，请核对站点积分和次数，勿重试；" if method == "POST" else ""
+            prefix = ("站点明确拒绝本次抽奖；" if method == "POST" and code == "rate_limited"
+                      else "抽奖 POST 结果不明，请核对站点积分和次数，勿重试；" if method == "POST" else "")
             safe_codes = {"browser_proof_required", "browser_proof_invalid", "no_token", "invalid_token", "token_revoked", "unauthorized", "rate_limited"}
             raise RuntimeError(prefix + f"站点接口失败：HTTP {response.status_code}" +
                                (f"，代码 {code}" if code in safe_codes else ""))
@@ -880,17 +883,65 @@ class Dian115Sign(_PluginBase):
         rows = self.get_data("dian115_wheel_records") or []
         return rows if isinstance(rows, list) else []
 
+    def _wheel_pace(self):
+        """在消费尝试之间节流；等待不能保证站点不再限流。"""
+        stamp = self.get_data("dian115_wheel_paid_at")
+        if stamp is None:
+            return
+        if isinstance(stamp, bool) or not isinstance(stamp, (int, float)) or stamp <= 0:
+            raise RuntimeError("消费冷却记录异常，已停止抽奖")
+        elapsed = time.time() - stamp
+        if elapsed < 0:
+            raise RuntimeError("系统时间早于上次消费记录，已停止抽奖")
+        wait = random.uniform(15.0, 25.0) - elapsed
+        if wait > 0:
+            time.sleep(wait)
+
+    def _wheel_reconcile_rejection(self, marker):
+        """仅完整解析的限流拒绝可按请求前快照只读核对。"""
+        if marker.get("date") != datetime.now().strftime("%Y-%m-%d") or marker.get("rejected") != "rate_limited":
+            raise RuntimeError("先前抽奖结果待核对，停止自动抽奖")
+        expected, before = marker.get("used_before"), marker.get("points_before")
+        if not (isinstance(expected, int) and not isinstance(expected, bool) and expected >= 0 and
+                isinstance(before, int) and not isinstance(before, bool) and before >= 0):
+            raise RuntimeError("限流核对快照缺失，停止自动抽奖")
+        self._wheel_pace()
+        status = self._wheel_request("GET", f"{self.API_BASE}/games/status")
+        account = self._wheel_request("GET", f"{self.API_BASE}/me")
+        wheel = (status.get("items") or {}).get("daily_wheel") or {}
+        used, points = wheel.get("used_today"), (account.get("user") or {}).get("points")
+        try:
+            if (isinstance(used, bool) or isinstance(points, bool) or
+                    not isinstance(used, (int, str)) or not isinstance(points, (int, str)) or
+                    int(used) != expected or int(points) != before):
+                raise ValueError
+        except (ValueError, TypeError):
+            raise RuntimeError("限流后站点次数或积分与请求前不一致，停止自动抽奖") from None
+        self.save_data("dian115_wheel_last", {"date": marker["date"], "status": "限流已核对", "uncertain": False})
+        check = self.get_data("dian115_wheel_last")
+        if (not isinstance(check, dict) or check.get("date") != marker["date"] or
+                check.get("status") != "限流已核对" or check.get("uncertain") is not False):
+            raise RuntimeError("限流核对记录保存失败，停止自动抽奖")
+
     def _wheel_run(self) -> dict:
         """每次消费前预检。仅记录明确成功的 POST；结果不明绝不重试。"""
         if not self._wheel_lock.acquire(blocking=False):
             return {"status": "执行中", "results": [], "error": "转盘任务正在运行"}
         results, error, initial_remaining, uncertain = [], "", None, False
+        last_used, last_maximum, baseline_used = None, None, None
         today = datetime.now().strftime("%Y-%m-%d")
+        progress = None
         try:
             last = self.get_data("dian115_wheel_last") or {}
-            if isinstance(last, dict) and last.get("date") == today and last.get("uncertain"):
-                return {"status": "未抽奖", "results": [], "error": "先前抽奖结果不明；请核对站点积分和次数，今日不再自动抽奖"}
+            if isinstance(last, dict) and last.get("uncertain"):
+                self._wheel_reconcile_rejection(last)
+                # 本轮仅核对明确拒绝，不在核对后接着发送新的付费请求。
+                return {"status": "未抽奖", "results": [], "error": "先前限流已核对；本轮未补抽"}
+            progress = self.get_data("dian115_wheel_progress")
+            if not isinstance(progress, dict) or progress.get("date") != today:
+                progress = None
             for _ in range(100):
+                self._wheel_pace()
                 status = self._wheel_request("GET", f"{self.API_BASE}/games/status")
                 wheel = (status.get("items") or {}).get("daily_wheel") or {}
                 raw_used, raw_maximum = wheel.get("used_today"), wheel.get("max_plays")
@@ -899,7 +950,15 @@ class Dian115Sign(_PluginBase):
                 used, maximum = int(raw_used), int(raw_maximum)
                 if maximum < 0 or used < 0 or maximum > 100:
                     raise RuntimeError("站点每日额度异常，已停止")
+                if progress is not None:
+                    base, count = progress.get("baseline"), progress.get("count")
+                    if not (isinstance(base, int) and not isinstance(base, bool) and base >= 0 and
+                            isinstance(count, int) and not isinstance(count, bool) and count >= 0):
+                        raise RuntimeError("本地额度记录异常，已停止")
+                    used = max(used, base + count)
+                last_used, last_maximum = used, maximum
                 if initial_remaining is None:
+                    baseline_used = used
                     initial_remaining = max(0, maximum - used)
                     if initial_remaining == 0:
                         error = "今日次数已用完"
@@ -910,12 +969,12 @@ class Dian115Sign(_PluginBase):
                     error = "今日次数已用完"
                     break
                 raw_cost = wheel.get("cost")
-                if raw_cost is None or isinstance(raw_cost, bool) or int(raw_cost) < 0:
+                if isinstance(raw_cost, bool) or not isinstance(raw_cost, (int, str)) or int(raw_cost) < 0:
                     raise RuntimeError("站点未返回有效抽奖成本，已停止")
                 cost = int(raw_cost)
                 me = self._wheel_request("GET", f"{self.API_BASE}/me")
                 raw_points = (me.get("user") or {}).get("points")
-                if raw_points is None or isinstance(raw_points, bool) or int(raw_points) < 0:
+                if isinstance(raw_points, bool) or not isinstance(raw_points, (int, str)) or int(raw_points) < 0:
                     raise RuntimeError("站点未返回有效积分，已停止")
                 if int(raw_points) - cost < 5:
                     error = "积分不足（至少保留 5 积分）"
@@ -923,11 +982,17 @@ class Dian115Sign(_PluginBase):
                 # 消费性请求任何失败均停止，不重试。
                 # 发送付费 POST 前持久化未确认状态；即使进程在响应前退出，也不会在下次签到时盲目重抽。
                 self.save_data("dian115_wheel_last", {"date": today, "status": "结果待核对",
-                                                      "error": "抽奖结果不明，请核对站点积分和次数", "uncertain": True})
+                                                      "error": "抽奖结果不明，请核对站点积分和次数",
+                                                      "used_before": used, "points_before": int(raw_points), "uncertain": True})
                 marker = self.get_data("dian115_wheel_last")
-                if not isinstance(marker, dict) or marker.get("date") != today or marker.get("uncertain") is not True:
+                if (not isinstance(marker, dict) or marker.get("date") != today or marker.get("uncertain") is not True
+                        or marker.get("used_before") != used or marker.get("points_before") != int(raw_points)):
                     raise RuntimeError("付费请求待核对标记未成功保存，停止抽奖")
                 uncertain = True
+                stamp = time.time()
+                self.save_data("dian115_wheel_paid_at", stamp)
+                if self.get_data("dian115_wheel_paid_at") != stamp:
+                    raise RuntimeError("消费冷却记录未成功保存，停止抽奖")
                 result = self._wheel_request("POST", f"{self.API_BASE}/lottery/wheel", retry=False)
                 prize = result.get("prize")
                 if not isinstance(prize, dict) or not any(k in prize for k in ("label", "points", "vip_days")):
@@ -935,21 +1000,53 @@ class Dian115Sign(_PluginBase):
                 row = {"date": datetime.now().isoformat(timespec="seconds"), "cost": cost,
                        "label": str(prize.get("label") or "未知")[:80],
                        "points": int(prize.get("points") or 0), "vip_days": int(prize.get("vip_days") or 0)}
+                records = (self._wheel_records() + [row])[-500:]
+                self.save_data("dian115_wheel_records", records)
+                if self._wheel_records() != records:
+                    raise RuntimeError("抽奖记录保存失败，停止自动抽奖")
+                if progress is None:
+                    progress = {"date": today, "baseline": used, "count": 0}
+                progress = {**progress, "count": progress["count"] + 1}
+                self.save_data("dian115_wheel_progress", progress)
+                if self.get_data("dian115_wheel_progress") != progress:
+                    raise RuntimeError("本地额度记录保存失败，停止自动抽奖")
                 results.append(row)
-                self.save_data("dian115_wheel_records", (self._wheel_records() + [row])[-500:])
-                uncertain = False
                 self.save_data("dian115_wheel_last", {"date": today, "status": "进行中", "error": "", "uncertain": False})
+                marker = self.get_data("dian115_wheel_last")
+                if (not isinstance(marker, dict) or marker.get("date") != today or
+                        marker.get("status") != "进行中" or marker.get("uncertain") is not False):
+                    raise RuntimeError("待核对标记未能清除，停止自动抽奖")
+                uncertain = False
         except Exception as exc:
             error = str(exc)[:160] if isinstance(exc, RuntimeError) else type(exc).__name__
             logger.warning(f"癫影签到集成转盘停止：{error}")
+            # 明确收到限流拒绝，不声称已扣费；保留待核对标记，不自动续抽。
+            # 只有本轮付费 POST 收到可解析的明确限流响应时才标记可只读核对。
+            if uncertain and error == "站点明确拒绝本次抽奖；站点接口失败：HTTP 429，代码 rate_limited":
+                error = "站点限流（rate_limited），本轮停止；不自动重试"
+                try:
+                    marker = self.get_data("dian115_wheel_last")
+                    if isinstance(marker, dict) and marker.get("uncertain"):
+                        rejected = {**marker, "rejected": "rate_limited"}
+                        self.save_data("dian115_wheel_last", rejected)
+                        if self.get_data("dian115_wheel_last") != rejected:
+                            logger.warning("限流拒绝标记读回不一致，保留待核对状态")
+                except Exception:
+                    logger.warning("限流拒绝标记保存失败，继续保留待核对状态")
         finally:
             self._wheel_lock.release()
         outcome = {"status": "完成" if results and not error else ("提前结束" if results else "未抽奖"),
-                   "results": results, "error": error}
+                   "results": results, "error": error, "planned": initial_remaining,
+                   "used_today": (max(last_used, baseline_used + len(results))
+                                  if last_used is not None and baseline_used is not None and "rate_limited" not in error else None),
+                   "max_plays": last_maximum if "rate_limited" not in error else None,
+                   "confirmed_used": baseline_used + len(results) if baseline_used is not None else None}
         if not uncertain:
             try:
-                self.save_data("dian115_wheel_last", {"date": today,
-                                                      "status": outcome["status"], "error": error, "uncertain": False})
+                marker = self.get_data("dian115_wheel_last")
+                if not (isinstance(marker, dict) and marker.get("uncertain")):
+                    self.save_data("dian115_wheel_last", {"date": today,
+                                                          "status": outcome["status"], "error": error, "uncertain": False})
             except Exception:
                 logger.warning("癫影转盘运行状态保存失败")
         return outcome
@@ -959,12 +1056,20 @@ class Dian115Sign(_PluginBase):
         if wheel is None:
             return []
         rows = wheel.get("results") or []
-        lines = [f"🎲 转盘：{wheel.get('status')} {len(rows)} 次" +
-                 (f"，消耗 {sum(int(r['cost']) for r in rows)} 积分" if rows else "")]
-        prizes = [str(r['label']) for r in rows]
-        lines.extend("  ｜  ".join(prizes[i:i + 2]) for i in range(0, len(prizes), 2))
+        names = Counter(str(row["label"]) for row in rows)
+        planned = wheel.get("planned")
+        used, maximum = wheel.get("used_today"), wheel.get("max_plays")
+        quota = f"{used}/{maximum}" if used is not None and maximum is not None else "获取失败"
+        headline = (f"🎡 转盘计划 {planned} 次，实际 {len(rows)} 次" if planned is not None
+                    else f"🎡 转盘本轮结束（实际 {len(rows)} 次）")
+        lines = [headline]
+        if rows:
+            lines.extend(["🎁 中奖汇总：", *(f"• {name} ×{count}" for name, count in names.items()),
+                          f"本次消耗：{sum(int(row['cost']) for row in rows)} 积分",
+                          f"积分奖励：{sum(int(row.get('points') or 0) for row in rows):+d}"])
+        lines.append(f"今日已用：{quota}")
         if wheel.get("error"):
-            lines.append(f"⚠️ {wheel['error']}")
+            lines.append(f"⚠️ {wheel['error']}" if not rows else f"⚠️ 提前结束：{wheel['error']}")
         return lines
 
     # ======================== 定时任务 ========================
@@ -1021,13 +1126,30 @@ class Dian115Sign(_PluginBase):
 
         if result.get("ok") and getattr(self, "_maximum_wheel", False):
             result["wheel"] = self._wheel_run()
-            try:
-                fresh = self._fetch_me()
-                raw_points = fresh.get("points") if fresh else None
-                result["wheel_points"] = (int(raw_points) if raw_points is not None and
-                                          not isinstance(raw_points, bool) and int(raw_points) >= 0 else None)
-            except Exception:
-                result["wheel_points"] = None
+            result["wheel_points"] = None
+            if "rate_limited" not in result["wheel"].get("error", ""):
+                try:
+                    self._wheel_pace()
+                    fresh = self._fetch_me()
+                    raw_points = fresh.get("points") if fresh else None
+                    result["wheel_points"] = (int(raw_points) if raw_points is not None and
+                                              not isinstance(raw_points, bool) and int(raw_points) >= 0 else None)
+                except Exception:
+                    pass
+                result["wheel"]["used_today"] = None
+                result["wheel"]["max_plays"] = None
+                try:
+                    status = self._wheel_request("GET", f"{self.API_BASE}/games/status")
+                    wheel = (status.get("items") or {}).get("daily_wheel") or {}
+                    used, maximum = wheel.get("used_today"), wheel.get("max_plays")
+                    if (isinstance(used, bool) or isinstance(maximum, bool) or
+                            not isinstance(used, (int, str)) or not isinstance(maximum, (int, str)) or
+                            int(used) < 0 or int(maximum) < 0):
+                        raise ValueError("额度无效")
+                    result["wheel"]["used_today"] = int(used)
+                    result["wheel"]["max_plays"] = int(maximum)
+                except Exception:
+                    pass
         if self._notify:
             self._send_notify(result)
 
@@ -1082,8 +1204,15 @@ class Dian115Sign(_PluginBase):
         if result.get("wheel") is not None:
             wheel = result["wheel"]
             sign_line = (f"✅ 签到：{'今日已签到' if result.get('already') else '成功，获得 ' + str(result.get('award', 0)) + ' 积分'}")
-            text = "\n".join([sign_line, *self._wheel_summary(wheel),
-                              f"💰 当前积分：{result.get('wheel_points') if result.get('wheel_points') is not None else '获取失败'}"])
+            wheel_lines = self._wheel_summary(wheel)
+            # 和独立癫影娱乐插件一致：余额在停止原因之前。
+            if wheel_lines and wheel.get("error"):
+                error_line = wheel_lines.pop()
+            else:
+                error_line = None
+            text = "\n".join([sign_line, *wheel_lines,
+                              f"💰 当前余额：{result.get('wheel_points') if result.get('wheel_points') is not None else '获取失败'}",
+                              *([error_line] if error_line else [])])
         try:
             self.post_message(mtype=NotificationType.Plugin, title=title, text=text)
         except Exception as e:
