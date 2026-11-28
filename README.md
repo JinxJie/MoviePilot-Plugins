@@ -237,7 +237,7 @@ NodeSeek 论坛每日自动签到，使用 curl_cffi 模拟 Chrome 浏览器指�
 </details>
 
 <details>
-<summary>6. 🧾 PT 论坛签到（ForumsSignin · V3）</summary>
+<summary>6. 🧾 PT 论坛签到（ForumSignin · V3）</summary>
 
 **v3.0.0 · 签到自动化 · 药丸（invites.fun）/ 蜂巢（fengchao.chat）/ 蓝影（hdblue.cc）**
 

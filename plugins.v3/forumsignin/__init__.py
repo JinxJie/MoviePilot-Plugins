@@ -67,7 +67,7 @@ def _fmt(value) -> str:
     return "—" if value in (None, "") else str(value)
 
 
-class ForumsSignin(_PluginBase):
+class ForumSignin(_PluginBase):
     plugin_name = "PT 论坛签到"
     plugin_desc = "药丸、蜂巢、蓝影三 PT 论坛统一自动签到：独立启用与周期、失败自动重试、按论坛展示签到数据与结果通知。"
     plugin_icon = "https://raw.githubusercontent.com/JinxJie/MoviePilot-Plugins/main/icons/forumsignin.png"
@@ -236,7 +236,7 @@ class ForumsSignin(_PluginBase):
             except (ValueError, IndexError):
                 continue
             services.append({
-                "id": f"ForumsSignin_{key.capitalize()}",
+                "id": f"ForumSignin_{key.capitalize()}",
                 "name": f"论坛签到·{FORUM_TITLES[key]}",
                 "trigger": trigger,
                 "func": self._run_forum,

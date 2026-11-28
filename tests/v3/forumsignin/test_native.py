@@ -421,7 +421,7 @@ def test_hdblue_payload_validation_rejects_bad_data():
 
 
 def make_plugin(config_overrides=None):
-    instance = plugin.ForumsSignin()
+    instance = plugin.ForumSignin()
     config = dict(plugin._config_form_module.DEFAULTS)
     config.update({
         "enabled": True, "notify_mode": "all",
@@ -439,7 +439,7 @@ def test_get_service_registers_each_ready_forum():
     instance = make_plugin()
     services = instance.get_service()
     assert [service["id"] for service in services] == \
-        ["ForumsSignin_Invites", "ForumsSignin_Fengchao", "ForumsSignin_Hdblue"]
+        ["ForumSignin_Invites", "ForumSignin_Fengchao", "ForumSignin_Hdblue"]
     assert all(service["trigger"].kwargs.get("jitter") == 1800 for service in services)
     # 宿主契约：func_kwargs 传给执行函数；kwargs 是 add_job 调度选项，不得混入业务参数
     assert [service["func_kwargs"]["forum_key"] for service in services] == \
@@ -474,7 +474,7 @@ def test_get_service_skips_unready_forum_and_bad_cron():
     instance = make_plugin({"fc_enabled": False, "hb_cron": "bad cron"})
     services = instance.get_service()
     assert [service["id"] for service in services] == \
-        ["ForumsSignin_Invites", "ForumsSignin_Hdblue"]
+        ["ForumSignin_Invites", "ForumSignin_Hdblue"]
     # 非法 cron 回退默认值
     assert instance._forums["hdblue"]["cron"] == \
         plugin._config_form_module.DEFAULTS["hb_cron"]
