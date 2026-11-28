@@ -316,13 +316,28 @@ class HDHavenTests(unittest.TestCase):
         form, defaults = p.get_form()
         self.assertFalse(defaults["use_browserless"])
         self.assertIn("browserless_url", str(form))
-        nodes = form[0]["content"]
-        cards = [node for node in nodes if node["component"] == "VCard"]
+
+        def find_components(node, component):
+            found = []
+            if isinstance(node, dict):
+                if node.get("component") == component:
+                    found.append(node)
+                for value in node.values():
+                    found.extend(find_components(value, component))
+            elif isinstance(node, list):
+                for item in node:
+                    found.extend(find_components(item, component))
+            return found
+
+        cards = find_components(form, "VCard")
         self.assertEqual(len(cards), 1)
         card = cards[0]
         self.assertEqual(card["props"]["class"], "mt-4 mb-3")
-        self.assertEqual(card["content"][0]["text"], "Browserless 备用模式（可选）")
-        fields = card["content"][1]["content"]
+        card_text = card["content"][1]
+        self.assertEqual(card_text["component"], "VCardText")
+        fields = find_components(card_text, "VSwitch") + \
+            [item for item in find_components(card_text, "VTextField")
+             if item["props"]["model"] == "browserless_url"]
         self.assertEqual([item["props"]["model"] for item in fields],
                          ["use_browserless", "browserless_url"])
         self.assertEqual(fields[1]["props"]["type"], "password")
@@ -538,6 +553,21 @@ class HDHavenTests(unittest.TestCase):
         self.assertIn("登录状态已失效", logged)
         self.assertNotIn("placeholder", logged)
 
+    def test_session_verify_required_maps_to_clear_guidance(self):
+        module = load()
+        plugin = module.HDHavenSign()
+        plugin.init_plugin({"cookie": "hdh_session=placeholder", "notify": False})
+        session = Session(account=Response(403, {"success": False,
+                                                 "code": "SESSION_VERIFY_REQUIRED",
+                                                 "message": "网络环境已变化，请完成人机验证后继续"}))
+        plugin._session = lambda: session
+        result = plugin._run(manual=True)
+        self.assertFalse(result["success"])
+        self.assertEqual(session.posts, [])
+        self.assertIn("网络环境变化", result["message"])
+        self.assertIn("人机验证", result["message"])
+        self.assertIn("代理节点", result["message"])
+
     def test_non_json_preflight_logs_response_type_without_body(self):
         module = load()
         plugin = module.HDHavenSign()
@@ -599,6 +629,30 @@ class HDHavenTests(unittest.TestCase):
             "id": 1, "checkin_today": True, "last_checkin": datetime.now().date().isoformat()}})
         self.assertTrue(p._run(manual=True)["success"])
         self.assertEqual(len(s.posts), 1)
+
+    def test_form_uses_grid_layout_with_all_fields(self):
+        p = load().HDHavenSign()
+        form, defaults = p.get_form()
+        rows = [item for item in form[0]["content"] if item.get("component") == "VRow"]
+        self.assertGreaterEqual(len(rows), 3)
+
+        def collect_models(node):
+            found = set()
+            if isinstance(node, dict):
+                props = node.get("props")
+                if isinstance(props, dict) and "model" in props:
+                    found.add(props["model"])
+                for value in node.values():
+                    found |= collect_models(value)
+            elif isinstance(node, list):
+                for item in node:
+                    found |= collect_models(item)
+            return found
+
+        models = collect_models(form)
+        for model in ("enabled", "onlyonce", "notify", "cookie", "cron",
+                      "use_system_proxy", "proxy", "use_browserless", "browserless_url"):
+            self.assertIn(model, models)
 
     def test_today_pending_checks_site_and_skips_when_signed(self):
         module = load()

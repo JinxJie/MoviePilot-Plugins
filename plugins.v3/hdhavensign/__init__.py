@@ -116,7 +116,7 @@ class HDHavenSign(_PluginBase):
     plugin_name = "栖影自动签到"
     plugin_desc = "HDHaven 普通签到、定时执行及结果通知"
     plugin_icon = "https://raw.githubusercontent.com/JinxJie/MoviePilot-Plugins/main/icons/hdhavensign.png"
-    plugin_version = "3.0.3"
+    plugin_version = "3.0.4"
     plugin_author = "JinxJie"
     author_url = "https://github.com/JinxJie"
     plugin_config_prefix = "hdhavensign_"
@@ -140,6 +140,7 @@ class HDHavenSign(_PluginBase):
         "签到结果数字字段缺失；请人工核对",
         "签到响应未确认，请在站点核对；再次运行会先查询站点今日签到状态",
         "未配置栖影登录会话 Cookie", "会话未通过登录预检，请重新登录并更新 Cookie",
+        "站点检测到网络环境变化：请在与插件相同的代理节点下重新登录并完成人机验证，再更新 Cookie",
         "站点今日签到状态无法确认，未发送签到请求",
         "站点确认今日已签到，但本地记录保存失败",
         "待核对标记保存失败，未发送签到请求",
@@ -358,6 +359,8 @@ class HDHavenSign(_PluginBase):
                 logger.warning("栖影签到登录预检：站点拒绝——code=%s，message=%s，server=%s，cf-mitigated=%s",
                                account.get("code", "-"), str(account.get("message") or "-")[:100],
                                me.headers.get("server") or "-", me.headers.get("cf-mitigated") or "-")
+                if account.get("code") == "SESSION_VERIFY_REQUIRED":
+                    raise RuntimeError("站点检测到网络环境变化：请在与插件相同的代理节点下重新登录并完成人机验证，再更新 Cookie")
                 raise RuntimeError("会话未通过登录预检，请重新登录并更新 Cookie")
             logger.info("栖影签到登录预检：通过")
             status = account["data"].get("checkin_today")
@@ -448,26 +451,45 @@ class HDHavenSign(_PluginBase):
     def get_form(self):
         def field(component, model, label, **props):
             return {"component": component, "props": {"model": model, "label": label, **props}}
+
+        def row(*cols):
+            return {"component": "VRow", "content": list(cols)}
+
+        def col(*content, **props):
+            props.setdefault("cols", 12)
+            return {"component": "VCol", "props": props, "content": list(content)}
+
         return ([{"component": "VForm", "content": [
-            field("VSwitch", "enabled", "启用定时签到"),
-            field("VSwitch", "onlyonce", "保存后执行一次签到"),
-            field("VSwitch", "notify", "发送结果通知"),
-            field("VTextField", "cookie", "栖影登录会话 Cookie", type="password",
-                  hint="仅在 MoviePilot 配置中填写浏览器登录后的 Cookie；失效后需手动更新", **{"persistent-hint": True}),
-            field("VTextField", "cron", "Cron（默认每天 09:30）"),
-            field("VSwitch", "use_system_proxy", "使用系统代理（默认开启）"),
-            field("VTextField", "proxy", "自定义代理（关闭系统代理时使用）"),
-            {"component": "VCard", "props": {"class": "mt-4 mb-3", "variant": "outlined"}, "content": [
-                {"component": "VCardTitle", "text": "Browserless 备用模式（可选）"},
-                {"component": "VCardText", "props": {"class": "pt-2"}, "content": [
-                    field("VSwitch", "use_browserless", "启用 Browserless（默认关闭）",
-                          hint="关闭时沿用现有签到路径；开启后本次请求使用 Browserless，不会在失败后自动切换或重发签到。",
-                          **{"persistent-hint": True}),
-                    field("VTextField", "browserless_url", "Browserless HTTPS /function 地址", type="password",
-                          hint="填写完整地址（含 ?token=...）；仅开启时使用，站点 Cookie 将发送给该服务，请仅使用可信服务。",
-                          **{"persistent-hint": True}),
-                ]},
-            ]},
+            row(
+                col(field("VSwitch", "enabled", "启用定时签到"), md=4),
+                col(field("VSwitch", "onlyonce", "保存后执行一次签到"), md=4),
+                col(field("VSwitch", "notify", "发送结果通知"), md=4),
+            ),
+            row(
+                col(field("VTextField", "cookie", "栖影登录会话 Cookie", type="password",
+                          hint="填写浏览器登录后的 Cookie，失效后需手动更新",
+                          **{"persistent-hint": True}), md=8),
+                col(field("VTextField", "cron", "Cron（默认每天 09:30）"), md=4),
+            ),
+            row(
+                col(field("VSwitch", "use_system_proxy", "使用系统代理（默认开启）"), md=4),
+                col(field("VTextField", "proxy", "自定义代理（关闭系统代理时使用）"), md=8),
+            ),
+            row(
+                col({"component": "VCard", "props": {"class": "mt-4 mb-3", "variant": "outlined"},
+                     "content": [
+                         {"component": "VCardTitle", "text": "Browserless 备用模式（可选）"},
+                         {"component": "VCardText", "props": {"class": "pt-2"}, "content": [
+                             field("VSwitch", "use_browserless", "启用 Browserless（默认关闭）",
+                                   hint="开启后本次请求经 Browserless 转发，失败不自动重发签到",
+                                   **{"persistent-hint": True}),
+                             field("VTextField", "browserless_url", "Browserless HTTPS /function 地址",
+                                   type="password",
+                                   hint="填写完整地址（含 ?token=...）；站点 Cookie 将发送给该服务，请仅使用可信服务",
+                                   **{"persistent-hint": True}),
+                         ]},
+                     ]}),
+            ),
             {"component": "VAlert", "props": {"type": "info", "variant": "tonal",
                                       "text": "登录需浏览器完成人机验证；每次先查询站点签到状态，仅明确未签到才提交请求。"}},
         ]}], {"enabled": False, "onlyonce": False, "notify": True, "cookie": "",
