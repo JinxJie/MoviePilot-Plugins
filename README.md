@@ -13,7 +13,7 @@ JinxJie 的 [MoviePilot](https://github.com/jxxghp/MoviePilot) 第三方插件�
 | 癫影自动签到（V3） | [`plugins.v3/dian115sign`](plugins.v3/dian115sign) | 3.0.2 | 普通签与运气签、转盘待核对后继续剩余计划、结束查询积分与次数 |
 | 癫影娱乐（V3） | [`plugins.v3/dian115wheel`](plugins.v3/dian115wheel) | 3.1.2 | 转盘、大富翁独立游玩，过程日志、积分护栏及结果记录 |
 | 栖影自动签到（V3） | [`plugins.v3/hdhavensign`](plugins.v3/hdhavensign) | 3.0.4 | 站点标识图标、网格化设置页；网络环境变化指引与账户概览 |
-| PT 论坛签到（V3） | [`plugins.v3/forumsignin`](plugins.v3/forumsignin) | 3.0.0 | 药丸、蜂巢、蓝影三论坛统一签到，独立 Cron、分论坛数据展示与失败重试 |
+| PT论坛签到（V3） | [`plugins.v3/forumsignin`](plugins.v3/forumsignin) | 3.0.0 | 药丸、蜂巢、蓝影三论坛统一签到，独立 Cron、分论坛数据展示与失败重试 |
 
 ## 📖 使用说明
 
@@ -237,12 +237,12 @@ NodeSeek 论坛每日自动签到，使用 curl_cffi 模拟 Chrome 浏览器指�
 </details>
 
 <details>
-<summary>6. 🧾 PT 论坛签到（ForumSignin · V3）</summary>
+<summary>6. 🧾 PT论坛签到（ForumSignin · V3）</summary>
 
 **v3.0.0 · 签到自动化 · 药丸（invites.fun）/ 蜂巢（fengchao.chat）/ 蓝影（hdblue.cc）**
 
 **功能：**
-药丸、蜂巢、蓝影三个 PT 论坛统一自动签到：各论坛独立启用与 Cron 周期、随机错峰、失败自动重试（当日封顶）；首页按论坛分别展示账号、积分、连续签到与近期签到数据，支持只读刷新论坛信息；结果通知对齐癫影签到模板。
+药丸、蜂巢、蓝影三个 PT论坛统一自动签到：各论坛独立启用与 Cron 周期、随机错峰、失败自动重试（当日封顶）；首页按论坛分别展示账号、积分、连续签到与近期签到数据，支持只读刷新论坛信息；结果通知对齐癫影签到模板。
 
 **标签：**
 签到、论坛、药丸、蜂巢、蓝影、自动化
@@ -291,7 +291,7 @@ MoviePilot-Plugins/
 ├── plugins.v3/                 # MoviePilot V3 原生插件
 │   ├── dian115sign/            # 癫影自动签到（V3）
 │   ├── dian115wheel/           # 癫影娱乐（V3）
-│   ├── forumsignin/            # PT 论坛签到（V3）
+│   ├── forumsignin/            # PT论坛签到（V3）
 │   ├── hdhavensign/            # 栖影自动签到（V3）
 │   └── nodeseek/               # NodeSeek 自动签到（V3）
 ├── scripts/                    # 插件测试与依赖检查脚本

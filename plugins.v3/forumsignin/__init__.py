@@ -1,4 +1,4 @@
-"""PT 论坛签到：药丸（invites.fun）、蜂巢（fengchao.chat）、蓝影（hdblue.cc）统一自动签到。
+"""PT论坛签到：药丸（invites.fun）、蜂巢（fengchao.chat）、蓝影（hdblue.cc）统一自动签到。
 
 每个论坛独立启用、独立 Cron（叠加全局随机延迟）；任一论坛失败按全局重试设置延迟重试，
 当日尝试次数用尽后停止。签到协议实现在 ``clients.py``（对照各上游插件逐条核实）。
@@ -68,8 +68,8 @@ def _fmt(value) -> str:
 
 
 class ForumSignin(_PluginBase):
-    plugin_name = "PT 论坛签到"
-    plugin_desc = "药丸、蜂巢、蓝影三 PT 论坛统一自动签到：独立启用与周期、失败自动重试、按论坛展示签到数据与结果通知。"
+    plugin_name = "PT论坛签到"
+    plugin_desc = "药丸、蜂巢、蓝影三PT论坛统一自动签到：独立启用与周期、失败自动重试、按论坛展示签到数据与结果通知。"
     plugin_icon = "https://raw.githubusercontent.com/JinxJie/MoviePilot-Plugins/main/icons/forumsignin.png"
     plugin_version = "3.0.0"
     plugin_author = "JinxJie"
@@ -148,7 +148,7 @@ class ForumSignin(_PluginBase):
             try:
                 self.update_config(updated)
             except Exception:
-                logger.warning("PT 论坛签到：一次性开关持久化失败，本次不执行任何即时任务")
+                logger.warning("PT论坛签到：一次性开关持久化失败，本次不执行任何即时任务")
                 return
         if one_shot["onlyonce"]:
             timer = threading.Timer(3, self._run_all)
@@ -252,9 +252,9 @@ class ForumSignin(_PluginBase):
         try:
             ready = [key for key in FORUM_KEYS if self._forum_ready(key)]
             if not ready:
-                logger.info("PT 论坛签到：立即执行时没有启用的论坛，跳过")
+                logger.info("PT论坛签到：立即执行时没有启用的论坛，跳过")
                 return
-            logger.info("PT 论坛签到：立即执行 " + "、".join(FORUM_TITLES[key] for key in ready)
+            logger.info("PT论坛签到：立即执行 " + "、".join(FORUM_TITLES[key] for key in ready)
                         + f"（共 {len(ready)} 个论坛）")
             for key in ready:
                 self._run_forum(key, manual=True)
@@ -314,7 +314,7 @@ class ForumSignin(_PluginBase):
     def _refresh_all(self):
         """只读刷新全部启用论坛的账号与签到数据（不签到）。"""
         if self._stopped:
-            logger.info("PT 论坛签到：插件已停止，取消信息刷新")
+            logger.info("PT论坛签到：插件已停止，取消信息刷新")
             return
         self._track_thread()
         try:
@@ -340,10 +340,10 @@ class ForumSignin(_PluginBase):
         lines = [f"{FORUM_ICONS[key]} {FORUM_TITLES[key]}：{outcome}"
                  for key, outcome in reported.items()]
         try:
-            self.post_message(mtype=MessageType.Plugin, title="【PT 论坛签到】论坛信息已刷新",
+            self.post_message(mtype=MessageType.Plugin, title="【PT论坛签到】论坛信息已刷新",
                               text="\n".join(lines))
         except Exception:
-            logger.warning("PT 论坛签到：刷新结果通知发送失败")
+            logger.warning("PT论坛签到：刷新结果通知发送失败")
 
     def _refresh_forum(self, forum_key: str) -> str:
         """只读拉取单个论坛的账号卡与签到数据并合并进缓存；返回给通知的结果说明。"""
@@ -764,5 +764,5 @@ class ForumSignin(_PluginBase):
             lingering = [thread for thread in self._inflight_threads
                          if thread is not threading.current_thread() and thread.is_alive()]
         if lingering:
-            logger.warning(f"PT 论坛签到：{len(lingering)} 个在途任务等待超时，"
+            logger.warning(f"PT论坛签到：{len(lingering)} 个在途任务等待超时，"
                            "已由停止标记阻断其结果落库与配置回写")
