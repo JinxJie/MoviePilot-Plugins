@@ -208,6 +208,7 @@ class HDHavenSign(_PluginBase):
             raise ValueError("Cookie 格式错误")
         if "hdh_session" not in jar or not jar["hdh_session"].value:
             raise ValueError("缺少栖影登录会话 Cookie")
+        logger.info("栖影签到会话 Cookie 项：%s", ",".join(sorted(jar.keys())))
         return "; ".join(f"{name}={item.value}" for name, item in jar.items())
 
     def _session(self):
@@ -342,11 +343,21 @@ class HDHavenSign(_PluginBase):
             response_type = "JSON" if "json" in content_type else "非JSON"
             logger.info("栖影签到登录预检：HTTP %s，响应类型=%s，发生跳转=%s",
                         me.status_code, response_type, bool(getattr(me, "history", None)))
-            account = self._decode(me)
+            try:
+                account = self._decode(me)
+            except RuntimeError:
+                if me.status_code != 200:
+                    logger.warning("栖影签到登录预检：站点拒绝——server=%s，cf-mitigated=%s",
+                                   me.headers.get("server") or "-", me.headers.get("cf-mitigated") or "-")
+                raise
             has_account = isinstance(account.get("data"), dict) and bool(account["data"].get("id"))
             logger.info("栖影签到登录预检：success=%s，账户标识存在=%s",
                         account.get("success") is True, has_account)
             if me.status_code != 200 or account.get("success") is not True or not has_account:
+                # 仅记录站点自身返回的拒绝原因与边缘头，便于区分会话失效、IP/指纹风控。
+                logger.warning("栖影签到登录预检：站点拒绝——code=%s，message=%s，server=%s，cf-mitigated=%s",
+                               account.get("code", "-"), str(account.get("message") or "-")[:100],
+                               me.headers.get("server") or "-", me.headers.get("cf-mitigated") or "-")
                 raise RuntimeError("会话未通过登录预检，请重新登录并更新 Cookie")
             logger.info("栖影签到登录预检：通过")
             status = account["data"].get("checkin_today")

@@ -505,11 +505,24 @@ class HDHavenTests(unittest.TestCase):
                 plugin._session()
             self.assertIn("将直连", str(warning.call_args_list))
 
-    def test_preflight_logs_redacted_status_and_failure_stage(self):
+    def test_cookie_names_logged_without_values(self):
+        module = load()
+        plugin = module.HDHavenSign()
+        with patch.object(module.logger, "info") as info:
+            cookie = plugin._parse_cookie("Cookie: hdh_session=cookie-secret; cf_clearance=clear-secret")
+        self.assertIn("hdh_session", cookie)
+        self.assertIn("cf_clearance", cookie)
+        logged = str(info.call_args_list)
+        self.assertIn("cf_clearance", logged)
+        self.assertIn("hdh_session", logged)
+        self.assertNotIn("cookie-secret", logged)
+        self.assertNotIn("clear-secret", logged)
+
+    def test_preflight_rejection_logs_site_reason_without_secrets(self):
         module = load()
         plugin = module.HDHavenSign()
         plugin.init_plugin({"cookie": "hdh_session=placeholder", "notify": False})
-        response = Response(403, {"success": False, "message": "private-token-secret"})
+        response = Response(403, {"success": False, "code": 4001, "message": "登录状态已失效"})
         response.history = [object()]
         session = Session(account=response)
         plugin._session = lambda: session
@@ -517,10 +530,13 @@ class HDHavenTests(unittest.TestCase):
             result = plugin._run(manual=True)
         self.assertFalse(result["success"])
         self.assertEqual(session.posts, [])
-        self.assertIn("403", str(info.call_args_list))
-        self.assertIn("JSON", str(info.call_args_list))
-        self.assertIn("登录预检", str(warning.call_args_list))
-        self.assertNotIn("private-token-secret", str(info.call_args_list) + str(warning.call_args_list))
+        logged = str(info.call_args_list) + str(warning.call_args_list)
+        self.assertIn("403", logged)
+        self.assertIn("JSON", logged)
+        self.assertIn("登录预检", logged)
+        self.assertIn("4001", logged)
+        self.assertIn("登录状态已失效", logged)
+        self.assertNotIn("placeholder", logged)
 
     def test_non_json_preflight_logs_response_type_without_body(self):
         module = load()
@@ -532,6 +548,7 @@ class HDHavenTests(unittest.TestCase):
             result = plugin._run(manual=True)
         self.assertIn("可能遭遇人机验证", result["message"])
         self.assertIn("非JSON", str(info.call_args_list))
+        self.assertIn("站点拒绝", str(warning.call_args_list))
         self.assertEqual(session.posts, [])
         self.assertNotIn("private-challenge-html", str(info.call_args_list) + str(warning.call_args_list))
 
