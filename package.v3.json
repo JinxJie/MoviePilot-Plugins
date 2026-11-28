@@ -66,5 +66,18 @@
       "v3.0.1": "签到前检查站点 checkin_today；待核对时也先查询站点，已签到跳过，明确未签到才提交；增加脱敏代理与预检诊断日志。",
       "v3.0.0": "首发 V3 原生版本：浏览器会话签到、只读会话预检、定时与手动运行、系统代理、结果通知及单实例当日防重。"
     }
+  },
+  "ForumsSignin": {
+    "name": "PT 论坛签到（V3）",
+    "description": "药丸（invites.fun）、蜂巢（fengchao.chat）、蓝影（hdblue.cc）三论坛统一自动签到：各论坛独立启用与 Cron 周期、随机错峰、失败自动重试（当日封顶）、癫影风格结果通知；首页按论坛分别展示账号、积分、连续签到与近期签到数据，支持只读刷新论坛信息；全局系统代理开关（默认关闭）应用于全部论坛；药丸支持 Cookie 刷新与账号密码登录兜底及可选浏览器仿真，蜂巢/蓝影走官方 Bearer Key 集成 API。",
+    "labels": "签到,论坛,药丸,蜂巢,蓝影,自动化",
+    "version": "3.0.0",
+    "icon": "https://raw.githubusercontent.com/JinxJie/MoviePilot-Plugins/main/icons/forumsignin.png",
+    "author": "JinxJie",
+    "level": 2,
+    "system_version": ">=3.0.0",
+    "history": {
+      "v3.0.0": "首发：整合三个论坛签到上游实现；药丸 Cookie 刷新+登录兜底+可选 CloakBrowser，蜂巢 Bearer Key 签到与账号卡（含近 30 天逐日奖励，不含 PT 人生快照推送与论坛通知 webhook），蓝影专用密钥签到、不确定结果复核与近 30 天历史；各论坛独立 Cron、全局随机延迟与全局系统代理开关（默认关闭）、失败重试、首页分论坛数据展示与只读信息刷新，通知模板对齐癫影签到。"
+    }
   }
 }
